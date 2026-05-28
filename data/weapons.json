@@ -1,0 +1,74 @@
+{
+  "weapons": [
+    {
+      "id": "short_sword",
+      "display_name": "短剑",
+      "damage_min": 35,
+      "damage_max": 50,
+      "armor_effectiveness": 1.0,
+      "armor_penetration": 0.0,
+      "ap_cost": 4,
+      "fatigue_cost": 6,
+      "range": 1,
+      "head_damage_mult": 1.5,
+      "weapon_type": "melee",
+      "_comment": "平衡型：泛用、容易上手"
+    },
+    {
+      "id": "war_hammer",
+      "display_name": "战锤",
+      "damage_min": 30,
+      "damage_max": 45,
+      "armor_effectiveness": 1.75,
+      "armor_penetration": 0.0,
+      "ap_cost": 5,
+      "fatigue_cost": 12,
+      "range": 1,
+      "head_damage_mult": 1.5,
+      "weapon_type": "melee",
+      "_comment": "破甲利器：对甲效率 175%，专门撕碎重甲"
+    },
+    {
+      "id": "dagger",
+      "display_name": "匕首",
+      "damage_min": 25,
+      "damage_max": 40,
+      "armor_effectiveness": 0.4,
+      "armor_penetration": 0.85,
+      "ap_cost": 3,
+      "fatigue_cost": 4,
+      "range": 1,
+      "head_damage_mult": 1.5,
+      "weapon_type": "melee",
+      "_comment": "穿刺(Puncture)：极高穿甲，用于剥甲战术（保留缴获盔甲）"
+    },
+    {
+      "id": "spear",
+      "display_name": "长矛",
+      "damage_min": 30,
+      "damage_max": 45,
+      "armor_effectiveness": 0.75,
+      "armor_penetration": 0.5,
+      "ap_cost": 4,
+      "fatigue_cost": 5,
+      "range": 1,
+      "head_damage_mult": 1.5,
+      "weapon_type": "melee",
+      "_comment": "穿甲均衡：50% 穿甲，二线攻击"
+    },
+    {
+      "id": "battle_axe",
+      "display_name": "战斧",
+      "damage_min": 45,
+      "damage_max": 65,
+      "armor_effectiveness": 1.25,
+      "armor_penetration": 0.0,
+      "ap_cost": 5,
+      "fatigue_cost": 10,
+      "range": 1,
+      "head_damage_mult": 1.5,
+      "weapon_type": "melee",
+      "_comment": "高伤害破甲：对甲 125%，伤害极高但耗疲劳"
+    }
+  ]
+}

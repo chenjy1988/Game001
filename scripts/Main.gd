@@ -1,18 +1,26 @@
 extends Node2D
 ##
-## Main.gd — Demo 入口场景
+## Main.gd — Demo 入口主菜单
 ##
-## 当前仅作为环境验证 + Phase 1 起点。
-## 后续会替换为：开始游戏 / 继续 / 设置 的主菜单，并跳转到 BattleScene。
-##
+
+@onready var start_button: Button = $UI/StartButton
+
 
 func _ready() -> void:
 	print("[Game001] Battle Brothers Demo started.")
 	print("[Game001] Godot version: ", Engine.get_version_info().string)
-	print("[Game001] Phase 1 goal: Initiative-based turn + move/attack + hit/damage/armor pipeline.")
+	print("[Game001] Phase 1: Initiative-based turn + move/attack + hit/damage/armor pipeline.")
+	if start_button:
+		start_button.pressed.connect(_on_start_pressed)
+
+
+func _on_start_pressed() -> void:
+	get_tree().change_scene_to_file("res://scenes/battle/BattleScene.tscn")
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	# 提供 ESC 退出，方便快速验证
-	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		get_tree().quit()
+	if event is InputEventKey and event.pressed:
+		if event.keycode == KEY_ESCAPE:
+			get_tree().quit()
+		elif event.keycode == KEY_ENTER or event.keycode == KEY_SPACE:
+			_on_start_pressed()

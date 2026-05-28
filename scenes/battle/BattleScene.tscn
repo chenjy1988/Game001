@@ -1,0 +1,258 @@
+[gd_scene load_steps=6 format=3 uid="uid://b2battle0scene1"]
+
+[ext_resource type="Script" path="res://scripts/core/BattleScene.gd" id="1_battle"]
+[ext_resource type="Script" path="res://scripts/core/HexGrid.gd" id="2_hexgrid"]
+[ext_resource type="Script" path="res://scripts/core/TurnManager.gd" id="3_turn"]
+[ext_resource type="Script" path="res://scripts/ui/SidePanel.gd" id="4_side"]
+[ext_resource type="Script" path="res://scripts/ui/TopBar.gd" id="5_top"]
+
+[node name="BattleScene" type="Node2D"]
+script = ExtResource("1_battle")
+
+[node name="Background" type="ColorRect" parent="."]
+offset_right = 1280.0
+offset_bottom = 720.0
+color = Color(0.118, 0.106, 0.137, 1)
+
+[node name="HexGrid" type="Node2D" parent="."]
+position = Vector2(440, 380)
+script = ExtResource("2_hexgrid")
+map_radius = 6
+
+[node name="UnitLayer" type="Node2D" parent="."]
+position = Vector2(440, 380)
+
+[node name="TurnManager" type="Node" parent="."]
+script = ExtResource("3_turn")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(640, 360)
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="TopBar" type="PanelContainer" parent="UI"]
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 44.0
+script = ExtResource("5_top")
+
+[node name="HBox" type="HBoxContainer" parent="UI/TopBar"]
+layout_mode = 2
+
+[node name="RoundLabel" type="Label" parent="UI/TopBar/HBox"]
+layout_mode = 2
+size_flags_horizontal = 0
+custom_minimum_size = Vector2(120, 0)
+theme_override_font_sizes/font_size = 18
+text = "回合 0"
+
+[node name="CurrentLabel" type="Label" parent="UI/TopBar/HBox"]
+layout_mode = 2
+size_flags_horizontal = 0
+custom_minimum_size = Vector2(260, 0)
+theme_override_font_sizes/font_size = 18
+text = "等待战斗开始..."
+
+[node name="OrderLabel" type="Label" parent="UI/TopBar/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.65, 0.6, 0.45, 1)
+text = "Initiative: -"
+clip_text = true
+
+[node name="SidePanel" type="PanelContainer" parent="UI"]
+anchors_preset = 11
+anchor_left = 1.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -360.0
+offset_top = 48.0
+offset_right = -8.0
+offset_bottom = -8.0
+script = ExtResource("4_side")
+
+[node name="VBox" type="VBoxContainer" parent="UI/SidePanel"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="UnitName" type="Label" parent="UI/SidePanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.83, 0.69, 0.22, 1)
+text = "—"
+
+[node name="Faction" type="Label" parent="UI/SidePanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "—"
+
+[node name="InitiativeLabel" type="Label" parent="UI/SidePanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.29, 0.85, 0.45, 1)
+text = "Initiative: —"
+
+[node name="Stats" type="VBoxContainer" parent="UI/SidePanel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="HPRow" type="HBoxContainer" parent="UI/SidePanel/VBox/Stats"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SidePanel/VBox/Stats/HPRow"]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+text = "HP"
+
+[node name="Bar" type="ProgressBar" parent="UI/SidePanel/VBox/Stats/HPRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 18)
+show_percentage = false
+modulate = Color(0.85, 0.22, 0.22, 1)
+
+[node name="Value" type="Label" parent="UI/SidePanel/VBox/Stats/HPRow"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+horizontal_alignment = 2
+text = "—"
+
+[node name="HeadArmorRow" type="HBoxContainer" parent="UI/SidePanel/VBox/Stats"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SidePanel/VBox/Stats/HeadArmorRow"]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+text = "头部甲"
+
+[node name="Bar" type="ProgressBar" parent="UI/SidePanel/VBox/Stats/HeadArmorRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 18)
+show_percentage = false
+modulate = Color(0.6, 0.6, 0.6, 1)
+
+[node name="Value" type="Label" parent="UI/SidePanel/VBox/Stats/HeadArmorRow"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+horizontal_alignment = 2
+text = "—"
+
+[node name="BodyArmorRow" type="HBoxContainer" parent="UI/SidePanel/VBox/Stats"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SidePanel/VBox/Stats/BodyArmorRow"]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+text = "身体甲"
+
+[node name="Bar" type="ProgressBar" parent="UI/SidePanel/VBox/Stats/BodyArmorRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 18)
+show_percentage = false
+modulate = Color(0.55, 0.65, 0.78, 1)
+
+[node name="Value" type="Label" parent="UI/SidePanel/VBox/Stats/BodyArmorRow"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+horizontal_alignment = 2
+text = "—"
+
+[node name="APRow" type="HBoxContainer" parent="UI/SidePanel/VBox/Stats"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SidePanel/VBox/Stats/APRow"]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+text = "AP"
+
+[node name="Bar" type="ProgressBar" parent="UI/SidePanel/VBox/Stats/APRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 18)
+show_percentage = false
+modulate = Color(0.85, 0.69, 0.22, 1)
+
+[node name="Value" type="Label" parent="UI/SidePanel/VBox/Stats/APRow"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+horizontal_alignment = 2
+text = "—"
+
+[node name="FatigueRow" type="HBoxContainer" parent="UI/SidePanel/VBox/Stats"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UI/SidePanel/VBox/Stats/FatigueRow"]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+text = "疲劳"
+
+[node name="Bar" type="ProgressBar" parent="UI/SidePanel/VBox/Stats/FatigueRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 18)
+show_percentage = false
+modulate = Color(0.85, 0.55, 0.29, 1)
+
+[node name="Value" type="Label" parent="UI/SidePanel/VBox/Stats/FatigueRow"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+horizontal_alignment = 2
+text = "—"
+
+[node name="Skills" type="Label" parent="UI/SidePanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "—"
+
+[node name="WeaponInfo" type="Label" parent="UI/SidePanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.83, 0.69, 0.22, 1)
+text = "武器：—"
+autowrap_mode = 2
+
+[node name="ArmorInfo" type="Label" parent="UI/SidePanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.55, 0.65, 0.78, 1)
+text = "护甲：—"
+autowrap_mode = 2
+
+[node name="LogPanel" type="PanelContainer" parent="UI/SidePanel/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Log" type="RichTextLabel" parent="UI/SidePanel/VBox/LogPanel"]
+layout_mode = 2
+bbcode_enabled = true
+fit_content = false
+scroll_active = true
+scroll_following = true
+custom_minimum_size = Vector2(0, 240)
+
+[node name="Hint" type="Label" parent="UI/SidePanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.55, 0.55, 0.55, 1)
+text = "左键：选中/移动/攻击   空格：结束回合   R：重开   ESC：取消"
+autowrap_mode = 2
+
+[node name="BattleResultLabel" type="Label" parent="UI"]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -60.0
+offset_right = 200.0
+offset_bottom = 60.0
+theme_override_font_sizes/font_size = 64
+text = "—"
+horizontal_alignment = 1
+vertical_alignment = 1

@@ -1,0 +1,40 @@
+{
+  "armors": [
+    {
+      "id": "no_armor",
+      "display_name": "无甲",
+      "head_armor": 0,
+      "body_armor": 0,
+      "weight": 0,
+      "combat_style": "nimble",
+      "_comment": "完全裸奔，初始化用"
+    },
+    {
+      "id": "leather_armor",
+      "display_name": "皮甲套装",
+      "head_armor": 30,
+      "body_armor": 50,
+      "weight": 8,
+      "combat_style": "nimble",
+      "_comment": "轻甲：重量轻，Initiative 影响小"
+    },
+    {
+      "id": "mail_armor",
+      "display_name": "锁子甲",
+      "head_armor": 80,
+      "body_armor": 130,
+      "weight": 18,
+      "combat_style": "balanced",
+      "_comment": "中甲：常见军装"
+    },
+    {
+      "id": "plate_armor",
+      "display_name": "板甲",
+      "head_armor": 200,
+      "body_armor": 280,
+      "weight": 35,
+      "combat_style": "battle_forged",
+      "_comment": "重甲：高防但拖慢 Initiative，必须破甲才能伤其皮肉"
+    }
+  ]
+}
