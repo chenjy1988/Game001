@@ -1,0 +1,30 @@
+# Godot 4+ specific ignores
+.godot/
+.import/
+
+# macOS
+.DS_Store
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Build / Export
+export.cfg
+export_presets.cfg
+build/
+dist/
+*.zip
+
+# Logs
+*.log
+
+# 用户本地配置（Godot 4 用 .godot 目录管理，但保留这条以防）
+override.cfg
+
+# Mono/.NET (即使后续不用 C# 也保留)
+.mono/
+mono_crash.*.json
+*.csproj.user
