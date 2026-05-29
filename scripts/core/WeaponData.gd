@@ -36,6 +36,10 @@ class_name WeaponData
 ## 头部命中伤害倍率（战兄弟规则：头部伤害 +50%）
 @export var head_damage_mult: float = 1.5
 
+## 暴击伤害倍率（最终 HP 伤害再 ×此值）
+## 暴击触发条件：命中 roll 落在 [0, 5) 区间（= 5 个整数点）
+@export var crit_mult: float = 1.5
+
 ## 武器类型：melee / ranged
 @export var weapon_type: String = "melee"
 
@@ -45,7 +49,7 @@ func roll_base_damage() -> int:
 
 
 func to_string_brief() -> String:
-	return "%s(伤%d-%d 对甲%.0f%% 穿甲%.0f%% AP%d)" % [
+	return "%s(伤%d-%d 对甲%.0f%% 穿甲%.0f%% 暴%.1fx AP%d)" % [
 		display_name, damage_min, damage_max,
-		armor_effectiveness * 100, armor_penetration * 100, ap_cost
+		armor_effectiveness * 100, armor_penetration * 100, crit_mult, ap_cost
 	]

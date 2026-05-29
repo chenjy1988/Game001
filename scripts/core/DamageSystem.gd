@@ -16,6 +16,7 @@ class_name DamageSystem
 const HEAD_HIT_CHANCE: float = 0.25  ## 头部命中概率（战兄弟约 25%）
 const HIT_CHANCE_MIN: float = 0.05
 const HIT_CHANCE_MAX: float = 0.95
+const CRIT_THRESHOLD: float = 0.05    ## roll < 0.05 视为暴击（必须先命中）
 
 
 ## 计算命中率（0-1）
@@ -40,6 +41,7 @@ static func execute_attack(attacker: Unit, target: Unit) -> Dictionary:
 		"hit_chance": hit_chance,
 		"roll": roll,
 		"hit": did_hit,
+		"critical": false,
 		"hit_location": "body",
 		"base_damage": 0,
 		"armor_damage": 0,
@@ -49,6 +51,10 @@ static func execute_attack(attacker: Unit, target: Unit) -> Dictionary:
 	}
 	if not did_hit:
 		return result
+
+	# 暴击：命中后 roll 是否 < CRIT_THRESHOLD（5%）
+	var is_crit: bool = roll < CRIT_THRESHOLD
+	result["critical"] = is_crit
 
 	# 命中部位
 	var loc: String = "head" if randf() < HEAD_HIT_CHANCE else "body"
@@ -85,6 +91,9 @@ static func execute_attack(attacker: Unit, target: Unit) -> Dictionary:
 	# 头部 ×1.5
 	if loc == "head":
 		hp_damage_f *= weapon.head_damage_mult
+	# 暴击 ×crit_mult
+	if is_crit:
+		hp_damage_f *= weapon.crit_mult
 
 	var hp_dmg: int = max(1, int(round(hp_damage_f))) if did_hit else 0
 	# 但如果完全没破甲且穿甲率 0（典型钝器砸全甲），HP 伤害可能很低，这是设计预期
@@ -133,10 +142,12 @@ static func format_attack_log(result: Dictionary) -> String:
 	var armor_dmg: int = result.get("armor_damage", 0)
 	var hp_dmg: int = result.get("hp_damage", 0)
 	var lethal: bool = result.get("lethal", false)
+	var is_crit: bool = result.get("critical", false)
+	var crit_tag: String = "[color=#FFD86B][b]【重击！】[/b][/color] " if is_crit else ""
 
 	# 行1：命中
-	var line1: String = "%s[color=#D4AF37]%s 使用%s击中了 %s 的%s[/color]（几率:%d，掷出:%d）" % [
-		prefix, attacker, weapon_name, target, loc_cn, chance_pct, roll_pct
+	var line1: String = "%s%s[color=#D4AF37]%s 使用%s击中了 %s 的%s[/color]（几率:%d，掷出:%d）" % [
+		prefix, crit_tag, attacker, weapon_name, target, loc_cn, chance_pct, roll_pct
 	]
 
 	# 行2：护甲与生命结果
