@@ -26,6 +26,8 @@ var _occupants: Dictionary = {}        ## Vector2i -> Unit (谁站在上面)
 var _highlight_move: Array[Vector2i] = []
 var _highlight_attack: Array[Vector2i] = []
 var _highlight_path: Array[Vector2i] = []
+var _highlight_zoc: Array[Vector2i] = []  ## 敌方控制区（弱橙叠加）
+var _highlight_oa_steps: Array[Vector2i] = []  ## 路径中会触发借机攻击的格子
 var _highlight_selected: Vector2i = Vector2i(99999, 99999)
 var _hover_hex: Vector2i = Vector2i(99999, 99999)
 
@@ -181,6 +183,67 @@ func get_attack_targets(origin: Vector2i, attack_range: int, attacker_faction: i
 	return result
 
 
+# ──────────── 控制区（Zone of Control） ────────────
+## 站在 cell 的单位 / 即将进入 cell 的单位，会被哪些敌方单位的 ZoC 控制？
+## 规则：装备近战武器、还活着、阵营不同的单位，距离恰好 1 视为控制 cell。
+## 不传 self_faction 时把所有敌方都算上（用于纯查询）。
+func get_zoc_controllers(cell: Vector2i, self_faction: int) -> Array:
+	var result: Array = []
+	for n in HexCoord.neighbors(cell):
+		var u = _occupants.get(n, null)
+		if u == null:
+			continue
+		if not u.has_method("is_alive") or not u.is_alive():
+			continue
+		if not u.has_method("get_faction") or u.get_faction() == self_faction:
+			continue
+		# 远程单位不产生 ZoC
+		if "weapon" in u and u.weapon != null and u.weapon.weapon_type != "melee":
+			continue
+		result.append(u)
+	return result
+
+
+## 取所有产生 ZoC 的格子（用于敌方阵营的"威胁地图"高亮）
+func get_zoc_cells_of(enemy_faction: int) -> Array[Vector2i]:
+	var seen: Dictionary = {}
+	var result: Array[Vector2i] = []
+	for axial in _occupants.keys():
+		var u = _occupants[axial]
+		if u == null or not u.has_method("is_alive") or not u.is_alive():
+			continue
+		if not u.has_method("get_faction") or u.get_faction() != enemy_faction:
+			continue
+		if "weapon" in u and u.weapon != null and u.weapon.weapon_type != "melee":
+			continue
+		for n in HexCoord.neighbors(axial):
+			if not _hexes.has(n):
+				continue
+			if seen.has(n):
+				continue
+			seen[n] = true
+			result.append(n)
+	return result
+
+
+## 沿一条路径走，识别每一步会触发哪些敌人借机攻击。
+## 返回 Array[Dictionary]，每一步一个：{from, to, oa_attackers: Array[Unit]}
+## 触发条件：上一格被某敌人控制，下一格不再被同一敌人控制（= 离开 ZoC）。
+func analyze_path_oa(start: Vector2i, path: Array[Vector2i], self_faction: int) -> Array:
+	var steps: Array = []
+	var prev: Vector2i = start
+	for step in path:
+		var oa_list: Array = []
+		var prev_ctrls: Array = get_zoc_controllers(prev, self_faction)
+		for ctrl in prev_ctrls:
+			# 离开 ctrl 的 ZoC = step 不再与 ctrl 相邻
+			if HexCoord.distance(step, ctrl.axial_pos) > 1:
+				oa_list.append(ctrl)
+		steps.append({"from": prev, "to": step, "oa_attackers": oa_list})
+		prev = step
+	return steps
+
+
 # ──────────── 高亮 API ────────────
 func set_highlight_move(hexes: Array[Vector2i]) -> void:
 	_highlight_move = hexes
@@ -197,6 +260,16 @@ func set_highlight_path(hexes: Array[Vector2i]) -> void:
 	queue_redraw()
 
 
+func set_highlight_zoc(hexes: Array[Vector2i]) -> void:
+	_highlight_zoc = hexes
+	queue_redraw()
+
+
+func set_highlight_oa_steps(hexes: Array[Vector2i]) -> void:
+	_highlight_oa_steps = hexes
+	queue_redraw()
+
+
 func set_selected(axial: Vector2i) -> void:
 	_highlight_selected = axial
 	queue_redraw()
@@ -206,6 +279,8 @@ func clear_highlights() -> void:
 	_highlight_move.clear()
 	_highlight_attack.clear()
 	_highlight_path.clear()
+	_highlight_zoc.clear()
+	_highlight_oa_steps.clear()
 	_highlight_selected = Vector2i(99999, 99999)
 	queue_redraw()
 
@@ -247,6 +322,8 @@ func _draw() -> void:
 	var color_move := Color(0.29, 0.56, 0.85, 0.35)  # 蓝色移动
 	var color_attack := Color(0.85, 0.29, 0.29, 0.45) # 红色攻击
 	var color_path := Color(0.85, 0.69, 0.22, 0.55)  # 暗金路径
+	var color_zoc := Color(0.95, 0.55, 0.25, 0.20)   # 弱橙：敌方 ZoC
+	var color_oa := Color(1.0, 0.35, 0.25, 0.85)     # 强橙红：借机攻击触发点
 	var color_selected := Color(0.91, 0.88, 0.81, 0.9) # 选中白边
 
 	# 绘制所有 hex
@@ -259,6 +336,12 @@ func _draw() -> void:
 		var pts_closed := pts.duplicate()
 		pts_closed.append(pts[0])
 		draw_polyline(pts_closed, color_border, 1.5, true)
+
+	# 高亮：敌方 ZoC（先画，让 move 蓝叠在上面更直观）
+	for axial in _highlight_zoc:
+		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
+		draw_colored_polygon(pts, color_zoc)
 
 	# 高亮：移动范围
 	for axial in _highlight_move:
@@ -276,6 +359,14 @@ func _draw() -> void:
 	for axial in _highlight_path:
 		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
 		draw_circle(center, 5.0, color_path)
+
+	# 高亮：会触发借机攻击的步格（粗描边警示）
+	for axial in _highlight_oa_steps:
+		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 2.5)
+		var pts_closed := pts.duplicate()
+		pts_closed.append(pts[0])
+		draw_polyline(pts_closed, color_oa, 2.5, true)
 
 	# Hover
 	if _hexes.has(_hover_hex):

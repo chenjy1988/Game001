@@ -64,7 +64,9 @@ func end_turn() -> void:
 
 
 # ──────────── 移动 ────────────
-## 沿路径异步移动；返回是否成功开始移动
+## 沿路径异步移动；返回是否成功开始移动。
+## 每走一步检查"是否离开了某个敌人的 ZoC"，触发借机攻击；
+## 被借机攻击打死则中断剩余路径。
 func move_along_path(path: Array[Vector2i]) -> bool:
 	if path.is_empty() or not is_alive():
 		return false
@@ -72,11 +74,7 @@ func move_along_path(path: Array[Vector2i]) -> bool:
 	if stats.ap < ap_needed:
 		return false
 
-	# 扣 AP / Fatigue（先扣，移动失败不会发生因为路径已校验）
-	stats.spend_ap(ap_needed)
-	stats.add_fatigue(path.size() * FATIGUE_PER_HEX)
-
-	# 异步动画
+	# 异步动画 + 逐步 OA 检查
 	_animate_path(path)
 	return true
 
@@ -84,18 +82,61 @@ func move_along_path(path: Array[Vector2i]) -> bool:
 func _animate_path(path: Array[Vector2i]) -> void:
 	var from: Vector2i = axial_pos
 	for step in path:
+		# 1) 出发前：本格被哪些敌人控制？（站定时点的 ZoC 才算）
+		var prev_ctrls: Array = hex_grid.get_zoc_controllers(axial_pos, get_faction())
+
+		# 2) 扣本步 AP / 疲劳
+		stats.spend_ap(AP_PER_HEX)
+		stats.add_fatigue(FATIGUE_PER_HEX)
+
+		# 3) 触发借机攻击：上一格相邻的敌人，若 step 与之不再相邻 = 离开 ZoC
+		for ctrl in prev_ctrls:
+			if not is_alive():
+				break
+			if HexCoord.distance(step, ctrl.axial_pos) > 1:
+				var oa_result: Dictionary = DamageSystem.execute_attack(ctrl, self)
+				oa_result["is_opportunity_attack"] = true
+				_apply_attack_result(ctrl, self, oa_result)
+				ctrl.attacked.emit(ctrl, self, oa_result)
+				if not is_alive():
+					break
+
+		# 被打死了则不再前进
+		if not is_alive():
+			stats_changed.emit(self)
+			return
+
+		# 4) tween 到下一格
 		var target_pos: Vector2 = HexCoord.axial_to_pixel(step, HexGrid.HEX_SIZE)
 		var distance: float = position.distance_to(target_pos)
-		var duration: float = distance / MOVE_SPEED_PX_PER_SEC
+		var duration: float = max(0.05, distance / MOVE_SPEED_PX_PER_SEC)
 		var tween := create_tween()
 		tween.tween_property(self, "position", target_pos, duration)
 		await tween.finished
-		# 更新占用
+
+		# 5) 更新占用
 		hex_grid.move_occupant(axial_pos, step, self)
 		axial_pos = step
 		moved.emit(self, from, step)
 		from = step
 	stats_changed.emit(self)
+
+
+## 把一次攻击结果应用到 target 上（用于借机攻击和正规攻击共用）
+static func _apply_attack_result(_attacker: Unit, target: Unit, result: Dictionary) -> void:
+	if not result.get("hit", false):
+		return
+	var loc: String = result.get("hit_location", "body")
+	var armor_dmg: int = result.get("armor_damage", 0)
+	var hp_dmg: int = result.get("hp_damage", 0)
+	if loc == "head":
+		target.stats.take_head_armor_damage(armor_dmg)
+	else:
+		target.stats.take_body_armor_damage(armor_dmg)
+	target.stats.take_hp_damage(hp_dmg)
+	target.stats_changed.emit(target)
+	if not target.is_alive():
+		target.unit_died.emit(target)
 
 
 # ──────────── 攻击 ────────────
@@ -114,19 +155,7 @@ func attack_target(target: Unit) -> Dictionary:
 	stats.add_fatigue(weapon.fatigue_cost)
 
 	var result: Dictionary = DamageSystem.execute_attack(self, target)
-	# 应用伤害到 target
-	if result.get("hit", false):
-		var loc: String = result.get("hit_location", "body")
-		var armor_dmg: int = result.get("armor_damage", 0)
-		var hp_dmg: int = result.get("hp_damage", 0)
-		if loc == "head":
-			target.stats.take_head_armor_damage(armor_dmg)
-		else:
-			target.stats.take_body_armor_damage(armor_dmg)
-		target.stats.take_hp_damage(hp_dmg)
-		target.stats_changed.emit(target)
-		if not target.is_alive():
-			target.unit_died.emit(target)
+	_apply_attack_result(self, target, result)
 
 	stats_changed.emit(self)
 	attacked.emit(self, target, result)

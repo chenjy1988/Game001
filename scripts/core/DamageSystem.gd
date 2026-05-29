@@ -96,12 +96,14 @@ static func format_attack_log(result: Dictionary) -> String:
 	var attacker: String = result.get("attacker_name", "?")
 	var target: String = result.get("target_name", "?")
 	var chance: float = result.get("hit_chance", 0.0)
+	var oa: bool = result.get("is_opportunity_attack", false)
+	var prefix: String = "[color=#FF8C42][借机攻击][/color] " if oa else ""
 	if not result.get("hit", false):
-		return "[color=#888888]%s 攻击 %s — Miss (命中%.0f%%)[/color]" % [attacker, target, chance * 100]
+		return "%s[color=#888888]%s 攻击 %s — Miss (命中%.0f%%)[/color]" % [prefix, attacker, target, chance * 100]
 	var loc: String = result.get("hit_location", "body")
 	var loc_cn: String = "头部" if loc == "head" else "身体"
 	var armor_dmg: int = result.get("armor_damage", 0)
 	var hp_dmg: int = result.get("hp_damage", 0)
-	return "[color=#D4AF37]%s 命中 %s 的%s[/color] — 护甲 -%d  生命 [color=#D94A4A]-%d[/color]" % [
-		attacker, target, loc_cn, armor_dmg, hp_dmg
+	return "%s[color=#D4AF37]%s 命中 %s 的%s[/color] — 护甲 -%d  生命 [color=#D94A4A]-%d[/color]" % [
+		prefix, attacker, target, loc_cn, armor_dmg, hp_dmg
 	]

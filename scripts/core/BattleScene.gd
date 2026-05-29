@@ -128,8 +128,8 @@ func _player_move(unit: Unit, path: Array[Vector2i]) -> void:
 	if unit.is_alive():
 		# 仍可继续行动（攻击/再走）— 只要 AP 够
 		_select_unit(unit)
-		# 既走不动也打不出，自动结束回合
-		if unit.stats.ap < Unit.AP_PER_HEX and unit.stats.ap < unit.weapon.ap_cost:
+		# 没 AP 了就结束回合
+		if unit.stats.ap < 1:
 			unit.end_turn()
 
 
@@ -142,8 +142,7 @@ func _player_attack(unit: Unit, target: Unit) -> void:
 		return  # 战斗结束等
 	if unit.is_alive():
 		_select_unit(unit)
-		# 既走不动也打不出，自动结束回合
-		if unit.stats.ap < Unit.AP_PER_HEX and unit.stats.ap < unit.weapon.ap_cost:
+		if unit.stats.ap < unit.weapon.ap_cost and unit.stats.ap < 1:
 			unit.end_turn()
 
 
@@ -160,6 +159,11 @@ func _select_unit(unit: Unit) -> void:
 	# 攻击范围
 	var atk_hexes: Array[Vector2i] = hex_grid.get_attack_targets(unit.axial_pos, unit.weapon.attack_range, unit.get_faction())
 	hex_grid.set_highlight_attack(atk_hexes)
+	print("[DEBUG] _select_unit: ", unit.get_unit_name(),
+		" pos=", unit.axial_pos,
+		" max_steps=", max_steps,
+		" move_hexes=", move_hexes.size(),
+		" atk_hexes=", atk_hexes.size())
 
 
 func _clear_selection() -> void:
