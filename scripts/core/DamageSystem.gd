@@ -13,7 +13,7 @@ class_name DamageSystem
 ##   7) HP 伤害 = 穿甲 + (1 - armor_pen) × 基础 × armor_factor，头部再 ×1.5
 ##
 
-const HEAD_HIT_CHANCE: float = 0.05  ## 头部命中概率（战兄弟约 5%）
+const HEAD_HIT_CHANCE: float = 0.25  ## 头部命中概率（战兄弟约 25%）
 const HIT_CHANCE_MIN: float = 0.05
 const HIT_CHANCE_MAX: float = 0.95
 
@@ -36,6 +36,7 @@ static func execute_attack(attacker: Unit, target: Unit) -> Dictionary:
 	var result: Dictionary = {
 		"attacker_name": attacker.get_unit_name(),
 		"target_name": target.get_unit_name(),
+		"weapon_name": attacker.weapon.display_name if attacker.weapon else "武器",
 		"hit_chance": hit_chance,
 		"roll": roll,
 		"hit": did_hit,
@@ -43,6 +44,8 @@ static func execute_attack(attacker: Unit, target: Unit) -> Dictionary:
 		"base_damage": 0,
 		"armor_damage": 0,
 		"hp_damage": 0,
+		"armor_state": "intact",
+		"lethal": false,
 	}
 	if not did_hit:
 		return result
@@ -86,24 +89,70 @@ static func execute_attack(attacker: Unit, target: Unit) -> Dictionary:
 	var hp_dmg: int = max(1, int(round(hp_damage_f))) if did_hit else 0
 	# 但如果完全没破甲且穿甲率 0（典型钝器砸全甲），HP 伤害可能很低，这是设计预期
 	result["hp_damage"] = hp_dmg
+
+	# 护甲状态：完全无视 / 击穿 / 破损 / 完好
+	var armor_state: String = "intact"
+	if current_armor <= 0:
+		armor_state = "no_armor"          # 目标本部位无甲
+	elif armor_dmg_raw >= current_armor:
+		armor_state = "broken"            # 这一击打穿
+	elif armor_actually_taken > 0:
+		armor_state = "damaged"           # 受损
+	result["armor_state"] = armor_state
+	# 击中后 HP 是否会归零（用于"倒下"日志）
+	result["lethal"] = (target.stats.hp - hp_dmg) <= 0
 	return result
 
 
-## 用于 UI 显示的格式化日志
+## 用于 UI 显示的格式化日志（战兄弟风格双行：攻击行 + 结果行）
+##   行1：[借机] 攻击者 使用 武器 击中/未击中 目标（几率:60，掷出:42）
+##   行2：目标的[部位甲]破损/被击穿/被无视，受到 X 点伤害
 static func format_attack_log(result: Dictionary) -> String:
 	if result.is_empty():
 		return ""
 	var attacker: String = result.get("attacker_name", "?")
 	var target: String = result.get("target_name", "?")
 	var chance: float = result.get("hit_chance", 0.0)
+	var roll: float = result.get("roll", 0.0)
 	var oa: bool = result.get("is_opportunity_attack", false)
-	var prefix: String = "[color=#FF8C42][借机攻击][/color] " if oa else ""
+	var weapon_name: String = result.get("weapon_name", "武器")
+
+	var prefix: String = "[color=#FF8C42][借机][/color] " if oa else ""
+	# 战兄弟格式：几率显示百分点(0~99)，掷出也是同尺度
+	var chance_pct: int = int(round(chance * 100.0))
+	var roll_pct: int = int(round(roll * 100.0))
+
 	if not result.get("hit", false):
-		return "%s[color=#888888]%s 攻击 %s — Miss (命中%.0f%%)[/color]" % [prefix, attacker, target, chance * 100]
+		return "%s[color=#888888]%s 使用%s攻击 %s，未命中（几率:%d，掷出:%d）[/color]" % [
+			prefix, attacker, weapon_name, target, chance_pct, roll_pct
+		]
+
 	var loc: String = result.get("hit_location", "body")
 	var loc_cn: String = "头部" if loc == "head" else "身体"
+	var armor_state: String = result.get("armor_state", "intact")
 	var armor_dmg: int = result.get("armor_damage", 0)
 	var hp_dmg: int = result.get("hp_damage", 0)
-	return "%s[color=#D4AF37]%s 命中 %s 的%s[/color] — 护甲 -%d  生命 [color=#D94A4A]-%d[/color]" % [
-		prefix, attacker, target, loc_cn, armor_dmg, hp_dmg
+	var lethal: bool = result.get("lethal", false)
+
+	# 行1：命中
+	var line1: String = "%s[color=#D4AF37]%s 使用%s击中了 %s 的%s[/color]（几率:%d，掷出:%d）" % [
+		prefix, attacker, weapon_name, target, loc_cn, chance_pct, roll_pct
 	]
+
+	# 行2：护甲与生命结果
+	var armor_phrase: String = ""
+	match armor_state:
+		"no_armor":
+			armor_phrase = "%s未穿戴该部位护甲" % target
+		"broken":
+			armor_phrase = "[color=#FFB347]%s 的%s甲被击穿[/color]（甲值 -%d）" % [target, loc_cn, armor_dmg]
+		"damaged":
+			armor_phrase = "%s 的%s甲破损（甲值 -%d）" % [target, loc_cn, armor_dmg]
+		_:
+			armor_phrase = "%s 的%s甲承受了攻击（甲值 -%d）" % [target, loc_cn, armor_dmg]
+
+	var hp_phrase: String = "受到 [color=#D94A4A]%d[/color] 点伤害" % hp_dmg
+	if lethal:
+		hp_phrase += " — [color=#A03030]致命一击[/color]"
+
+	return line1 + "\n    " + armor_phrase + "，" + hp_phrase
