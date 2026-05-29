@@ -28,11 +28,16 @@ var _ai_acting: bool = false
 
 func _ready() -> void:
 	hex_grid.hex_clicked.connect(_on_hex_clicked)
+	hex_grid.hex_hovered.connect(_on_hex_hovered)
 	turn_manager.turn_started.connect(_on_turn_started)
 	turn_manager.battle_ended.connect(_on_battle_ended)
 
 	_spawn_units()
 	turn_manager.register_units(_all_units)
+	# 统一监听攻击/死亡信号，正规攻击与借机攻击共用日志
+	for u in _all_units:
+		u.attacked.connect(_on_any_unit_attacked)
+		u.unit_died.connect(_on_any_unit_died)
 	turn_manager.start_battle()
 
 
@@ -123,26 +128,29 @@ func _player_move(unit: Unit, path: Array[Vector2i]) -> void:
 	if not ok:
 		_select_unit(unit)
 		return
-	# 等动画结束（用 moved 信号最后一次）—— 简单做法：等帧后刷新
-	await get_tree().create_timer(path.size() * 0.18).timeout
+	# 等动画结束（每步约 0.22s，含借机攻击缓冲）
+	await get_tree().create_timer(path.size() * 0.22 + 0.1).timeout
 	if unit.is_alive():
-		# 仍可继续行动（攻击/再走）— 只要 AP 够
 		_select_unit(unit)
-		# 没 AP 了就结束回合
-		if unit.stats.ap < 1:
+		# 既走不动也打不出，自动结束回合
+		if unit.stats.ap < Unit.AP_PER_HEX and unit.stats.ap < unit.weapon.ap_cost:
 			unit.end_turn()
+	# 若被借机攻击打死，主动结束回合让 TurnManager 推进
+	elif turn_manager.get_current_unit() == unit:
+		unit.end_turn()
 
 
 func _player_attack(unit: Unit, target: Unit) -> void:
 	hex_grid.clear_highlights()
-	var result: Dictionary = unit.attack_target(target)
-	unit_panel.append_log(DamageSystem.format_attack_log(result))
+	# 攻击日志统一由 _on_any_unit_attacked 处理
+	unit.attack_target(target)
 	await get_tree().create_timer(0.45).timeout
 	if not turn_manager.get_current_unit() == unit:
 		return  # 战斗结束等
 	if unit.is_alive():
 		_select_unit(unit)
-		if unit.stats.ap < unit.weapon.ap_cost and unit.stats.ap < 1:
+		# 既走不动也打不出，自动结束回合
+		if unit.stats.ap < Unit.AP_PER_HEX and unit.stats.ap < unit.weapon.ap_cost:
 			unit.end_turn()
 
 
@@ -159,11 +167,54 @@ func _select_unit(unit: Unit) -> void:
 	# 攻击范围
 	var atk_hexes: Array[Vector2i] = hex_grid.get_attack_targets(unit.axial_pos, unit.weapon.attack_range, unit.get_faction())
 	hex_grid.set_highlight_attack(atk_hexes)
-	print("[DEBUG] _select_unit: ", unit.get_unit_name(),
-		" pos=", unit.axial_pos,
-		" max_steps=", max_steps,
-		" move_hexes=", move_hexes.size(),
-		" atk_hexes=", atk_hexes.size())
+	# 敌方 ZoC 威胁地图（仅友方选中时显示）
+	if unit.get_faction() == 0:
+		var enemy_faction: int = 1
+		var zoc_cells: Array[Vector2i] = hex_grid.get_zoc_cells_of(enemy_faction)
+		hex_grid.set_highlight_zoc(zoc_cells)
+
+
+# 鼠标移到某格 → 实时预览路径与借机攻击触发点
+func _on_hex_hovered(axial: Vector2i) -> void:
+	if _ai_acting or _selected_unit == null or not _selected_unit.is_alive():
+		return
+	if _selected_unit.get_faction() != 0:
+		return
+	var current: Unit = _selected_unit
+	# 鼠标停在单位身上 → 不做路径预览
+	var occ = hex_grid.get_occupant(axial)
+	if occ != null:
+		hex_grid.set_highlight_path([] as Array[Vector2i])
+		hex_grid.set_highlight_oa_steps([] as Array[Vector2i])
+		return
+	var path: Array[Vector2i] = hex_grid.find_path(current.axial_pos, axial, current.axial_pos)
+	@warning_ignore("integer_division")
+	var max_steps: int = current.stats.ap / Unit.AP_PER_HEX
+	if path.is_empty() or path.size() > max_steps:
+		hex_grid.set_highlight_path([] as Array[Vector2i])
+		hex_grid.set_highlight_oa_steps([] as Array[Vector2i])
+		return
+	hex_grid.set_highlight_path(path)
+	# 标记会触发借机攻击的步格
+	var oa_steps: Array[Vector2i] = []
+	var step_info: Array = hex_grid.analyze_path_oa(current.axial_pos, path, current.get_faction())
+	for s in step_info:
+		if not s["oa_attackers"].is_empty():
+			oa_steps.append(s["to"])
+	hex_grid.set_highlight_oa_steps(oa_steps)
+
+
+# ──────────── 攻击日志 / 死亡通知（正规与借机攻击统一处理） ────────────
+func _on_any_unit_attacked(_attacker: Unit, _target: Unit, result: Dictionary) -> void:
+	unit_panel.append_log(DamageSystem.format_attack_log(result))
+
+
+func _on_any_unit_died(unit: Unit) -> void:
+	hex_grid.set_occupant(unit.axial_pos, null)
+	unit.queue_redraw()
+	unit_panel.append_log("[color=#A03030]✦ %s 倒下[/color]" % unit.get_unit_name())
+	if _selected_unit == unit:
+		_clear_selection()
 
 
 func _clear_selection() -> void:
@@ -172,82 +223,45 @@ func _clear_selection() -> void:
 	hex_grid.clear_highlights()
 
 
-# ──────────── 简单 AI ────────────
+# ──────────── AI（评分式决策） ────────────
+## 评分式：BattleAI 静态决策器返回 Plan，这里负责按 Plan 执行（移动 + 攻击 + 兜底结束回合）
 func _run_ai_turn(unit: Unit) -> void:
 	await get_tree().create_timer(0.35).timeout
-
-	# 找最近的友方单位
-	var target: Unit = _find_closest_enemy(unit)
-	if target == null:
+	if not unit.is_alive():
 		unit.end_turn()
 		_ai_acting = false
 		return
 
-	# 在攻击范围 → 直接打
-	var dist: int = HexCoord.distance(unit.axial_pos, target.axial_pos)
-	if dist <= unit.weapon.attack_range and unit.stats.ap >= unit.weapon.ap_cost:
-		var result: Dictionary = unit.attack_target(target)
-		unit_panel.append_log(DamageSystem.format_attack_log(result))
-		await get_tree().create_timer(0.5).timeout
-		# 还能再打就再打一次
-		if unit.is_alive() and target.is_alive() and unit.stats.ap >= unit.weapon.ap_cost:
-			result = unit.attack_target(target)
-			unit_panel.append_log(DamageSystem.format_attack_log(result))
-			await get_tree().create_timer(0.5).timeout
-		unit.end_turn()
-		_ai_acting = false
-		return
+	# 主循环：可能"移动+攻击"后 AP 还够再打 1 次，所以决策最多重试 3 次
+	var safety: int = 3
+	while safety > 0 and unit.is_alive():
+		safety -= 1
+		var plan: Dictionary = BattleAI.decide(unit, _all_units, hex_grid)
+		var path: Array[Vector2i] = plan.get("path", [] as Array[Vector2i])
+		var target: Unit = plan.get("target", null)
 
-	# 否则向目标走（找一条尽量靠近的路径）
-	var path: Array[Vector2i] = hex_grid.find_path(unit.axial_pos, target.axial_pos, unit.axial_pos)
-	if path.is_empty():
-		unit.end_turn()
-		_ai_acting = false
-		return
-	# 路径终点是 target 占用格 → 截断到攻击范围以内
-	@warning_ignore("integer_division")
-	var max_steps: int = unit.stats.ap / Unit.AP_PER_HEX
-	var trimmed: Array[Vector2i] = []
-	for step in path:
-		if HexCoord.distance(step, target.axial_pos) < 1:
-			break  # 不能走到敌人格上
-		trimmed.append(step)
-		if trimmed.size() >= max_steps:
-			break
-		if HexCoord.distance(step, target.axial_pos) <= unit.weapon.attack_range:
-			# 走到攻击范围就停下
-			break
-	if trimmed.is_empty():
-		unit.end_turn()
-		_ai_acting = false
-		return
-	unit.move_along_path(trimmed)
-	await get_tree().create_timer(trimmed.size() * 0.18 + 0.1).timeout
+		# 1) 先执行移动（若有）
+		if not path.is_empty():
+			unit.move_along_path(path)
+			await get_tree().create_timer(path.size() * 0.22 + 0.1).timeout
+			if not unit.is_alive():
+				break  # 被借机攻击打死
 
-	# 走完看能不能打
-	if unit.is_alive() and target.is_alive():
-		var d: int = HexCoord.distance(unit.axial_pos, target.axial_pos)
-		if d <= unit.weapon.attack_range and unit.stats.ap >= unit.weapon.ap_cost:
-			var result: Dictionary = unit.attack_target(target)
-			unit_panel.append_log(DamageSystem.format_attack_log(result))
-			await get_tree().create_timer(0.5).timeout
-	unit.end_turn()
+		# 2) 再执行攻击（若 plan 给出且仍可执行）
+		if target != null and unit.is_alive() and target.is_alive():
+			var d: int = HexCoord.distance(unit.axial_pos, target.axial_pos)
+			if d <= unit.weapon.attack_range and unit.stats.ap >= unit.weapon.ap_cost:
+				unit.attack_target(target)
+				await get_tree().create_timer(0.5).timeout
+				# AP 还多 → 再继续循环看是否能补刀
+				if unit.is_alive() and unit.stats.ap >= unit.weapon.ap_cost:
+					continue
+		# 没有目标或已动用，回合结束
+		break
+
+	if unit.is_alive():
+		unit.end_turn()
 	_ai_acting = false
-
-
-func _find_closest_enemy(unit: Unit) -> Unit:
-	var best: Unit = null
-	var best_dist: int = 9999
-	for u in _all_units:
-		if not u.is_alive():
-			continue
-		if u.get_faction() == unit.get_faction():
-			continue
-		var d: int = HexCoord.distance(unit.axial_pos, u.axial_pos)
-		if d < best_dist:
-			best_dist = d
-			best = u
-	return best
 
 
 # ──────────── 战斗结束 ────────────
