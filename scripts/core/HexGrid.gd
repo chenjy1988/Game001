@@ -305,8 +305,8 @@ func _input(event: InputEvent) -> void:
 		if _hover_hex != ax:
 			_hover_hex = ax
 			queue_redraw()
-			if _hexes.has(ax):
-				hex_hovered.emit(ax)
+			# 永远 emit（即便光标离开地图），让上层决定如何处理"无效格"
+			hex_hovered.emit(ax)
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var ax: Vector2i = world_to_axial(get_global_mouse_position())
 		if _hexes.has(ax):

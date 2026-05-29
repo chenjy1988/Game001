@@ -1,10 +1,11 @@
-[gd_scene load_steps=6 format=3 uid="uid://b2battle0scene1"]
+[gd_scene load_steps=7 format=3 uid="uid://b2battle0scene1"]
 
 [ext_resource type="Script" path="res://scripts/core/BattleScene.gd" id="1_battle"]
 [ext_resource type="Script" path="res://scripts/core/HexGrid.gd" id="2_hexgrid"]
 [ext_resource type="Script" path="res://scripts/core/TurnManager.gd" id="3_turn"]
 [ext_resource type="Script" path="res://scripts/ui/SidePanel.gd" id="4_side"]
 [ext_resource type="Script" path="res://scripts/ui/TopBar.gd" id="5_top"]
+[ext_resource type="Script" path="res://scripts/ui/UnitTooltip.gd" id="6_tooltip"]
 
 [node name="BattleScene" type="Node2D"]
 script = ExtResource("1_battle")
@@ -257,3 +258,59 @@ theme_override_font_sizes/font_size = 64
 text = "—"
 horizontal_alignment = 1
 vertical_alignment = 1
+
+[node name="UnitTooltip" type="PanelContainer" parent="UI"]
+visible = false
+custom_minimum_size = Vector2(220, 0)
+script = ExtResource("6_tooltip")
+
+[node name="VBox" type="VBoxContainer" parent="UI/UnitTooltip"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Header" type="HBoxContainer" parent="UI/UnitTooltip/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="FactionDot" type="ColorRect" parent="UI/UnitTooltip/VBox/Header"]
+custom_minimum_size = Vector2(10, 10)
+layout_mode = 2
+size_flags_vertical = 4
+color = Color(0.29, 0.56, 0.85, 1)
+
+[node name="Name" type="Label" parent="UI/UnitTooltip/VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 16
+theme_override_colors/font_color = Color(0.91, 0.88, 0.81, 1)
+text = "—"
+
+[node name="StateLabel" type="Label" parent="UI/UnitTooltip/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.7, 0.65, 0.5, 1)
+text = "—"
+
+[node name="HPBar" type="ProgressBar" parent="UI/UnitTooltip/VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 10)
+show_percentage = false
+modulate = Color(0.85, 0.22, 0.22, 1)
+
+[node name="HeadBar" type="ProgressBar" parent="UI/UnitTooltip/VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 6)
+show_percentage = false
+modulate = Color(0.6, 0.6, 0.6, 1)
+
+[node name="BodyBar" type="ProgressBar" parent="UI/UnitTooltip/VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 8)
+show_percentage = false
+modulate = Color(0.55, 0.65, 0.78, 1)
+
+[node name="FatigueBar" type="ProgressBar" parent="UI/UnitTooltip/VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 6)
+show_percentage = false
+modulate = Color(0.85, 0.55, 0.29, 1)

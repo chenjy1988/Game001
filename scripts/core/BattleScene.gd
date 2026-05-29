@@ -16,6 +16,7 @@ extends Node2D
 @onready var unit_layer: Node2D = $UnitLayer
 @onready var unit_panel = $UI/SidePanel
 @onready var top_bar = $UI/TopBar
+@onready var tooltip = $UI/UnitTooltip
 @onready var battle_result_label: Label = $UI/BattleResultLabel
 
 # 玩家输入状态
@@ -174,15 +175,24 @@ func _select_unit(unit: Unit) -> void:
 		hex_grid.set_highlight_zoc(zoc_cells)
 
 
-# 鼠标移到某格 → 实时预览路径与借机攻击触发点
+# 鼠标移到某格 → 实时预览路径与借机攻击触发点 + 单位 tooltip 显隐
 func _on_hex_hovered(axial: Vector2i) -> void:
+	# tooltip：任何单位（不论阵营）都显示
+	var occ = hex_grid.get_occupant(axial)
+	if occ != null and occ.is_alive():
+		tooltip.show_for(occ, get_viewport().get_mouse_position())
+	else:
+		tooltip.hide()
+
+	# 路径预览：仅当玩家正在控制时
 	if _ai_acting or _selected_unit == null or not _selected_unit.is_alive():
+		hex_grid.set_highlight_path([] as Array[Vector2i])
+		hex_grid.set_highlight_oa_steps([] as Array[Vector2i])
 		return
 	if _selected_unit.get_faction() != 0:
 		return
 	var current: Unit = _selected_unit
-	# 鼠标停在单位身上 → 不做路径预览
-	var occ = hex_grid.get_occupant(axial)
+	# 鼠标停在单位身上 → 清空路径预览
 	if occ != null:
 		hex_grid.set_highlight_path([] as Array[Vector2i])
 		hex_grid.set_highlight_oa_steps([] as Array[Vector2i])
@@ -202,6 +212,12 @@ func _on_hex_hovered(axial: Vector2i) -> void:
 		if not s["oa_attackers"].is_empty():
 			oa_steps.append(s["to"])
 	hex_grid.set_highlight_oa_steps(oa_steps)
+
+
+# tooltip 跟随光标在同 hex 内的细微移动
+func _process(_delta: float) -> void:
+	if tooltip and tooltip.visible:
+		tooltip.update_position(get_viewport().get_mouse_position())
 
 
 # ──────────── 攻击日志 / 死亡通知（正规与借机攻击统一处理） ────────────
