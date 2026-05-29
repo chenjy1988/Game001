@@ -37,8 +37,11 @@ class_name WeaponData
 @export var head_damage_mult: float = 1.5
 
 ## 暴击伤害倍率（最终 HP 伤害再 ×此值）
-## 暴击触发条件：命中 roll 落在 [0, 5) 区间（= 5 个整数点）
 @export var crit_mult: float = 1.5
+
+## 额外暴击概率（叠加到基础 5%）
+## 暴击阈值 = 0.05 + bonus_crit_chance；匕首等精准武器可拉高
+@export var bonus_crit_chance: float = 0.0
 
 ## 武器类型：melee / ranged
 @export var weapon_type: String = "melee"
@@ -49,7 +52,9 @@ func roll_base_damage() -> int:
 
 
 func to_string_brief() -> String:
-	return "%s(伤%d-%d 对甲%.0f%% 穿甲%.0f%% 暴%.1fx AP%d)" % [
+	var crit_pct: int = int(round((0.05 + bonus_crit_chance) * 100))
+	return "%s(伤%d-%d 对甲%.0f%% 穿甲%.0f%% 暴%d%%×%.1f AP%d)" % [
 		display_name, damage_min, damage_max,
-		armor_effectiveness * 100, armor_penetration * 100, crit_mult, ap_cost
+		armor_effectiveness * 100, armor_penetration * 100,
+		crit_pct, crit_mult, ap_cost
 	]

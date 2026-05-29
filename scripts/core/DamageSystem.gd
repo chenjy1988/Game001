@@ -52,8 +52,9 @@ static func execute_attack(attacker: Unit, target: Unit) -> Dictionary:
 	if not did_hit:
 		return result
 
-	# 暴击：命中后 roll 是否 < CRIT_THRESHOLD（5%）
-	var is_crit: bool = roll < CRIT_THRESHOLD
+	# 暴击：命中后 roll 是否 < 暴击阈值（基础 5% + 武器 bonus）
+	var crit_threshold: float = CRIT_THRESHOLD + (attacker.weapon.bonus_crit_chance if attacker.weapon else 0.0)
+	var is_crit: bool = roll < crit_threshold
 	result["critical"] = is_crit
 
 	# 命中部位

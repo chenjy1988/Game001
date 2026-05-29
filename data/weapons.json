@@ -42,6 +42,7 @@
       "range": 1,
       "head_damage_mult": 1.5,
       "crit_mult": 1.8,
+      "bonus_crit_chance": 0.10,
       "weapon_type": "melee",
       "_comment": "穿刺(Puncture)：极高穿甲，用于剥甲战术（保留缴获盔甲）"
     },

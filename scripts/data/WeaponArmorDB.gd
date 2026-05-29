@@ -41,6 +41,7 @@ func _load_weapons() -> void:
 		w.attack_range = int(entry.get("range", 1))
 		w.head_damage_mult = float(entry.get("head_damage_mult", 1.5))
 		w.crit_mult = float(entry.get("crit_mult", 1.5))
+		w.bonus_crit_chance = float(entry.get("bonus_crit_chance", 0.0))
 		w.weapon_type = entry.get("weapon_type", "melee")
 		_weapons[w.id] = w
 
