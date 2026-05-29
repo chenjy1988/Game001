@@ -22,7 +22,7 @@ var hex_grid: HexGrid = null               ## 由 BattleScene 注入
 
 const MOVE_SPEED_PX_PER_SEC: float = 220.0
 const FATIGUE_PER_HEX: int = 3             ## 每移动 1 hex 消耗的疲劳
-const AP_PER_HEX: int = 1                  ## 每移动 1 hex 消耗的 AP
+const AP_PER_HEX: int = 2                  ## 每移动 1 hex 消耗的 AP（战兄弟标准节奏）
 
 
 func _ready() -> void:
@@ -107,7 +107,7 @@ func attack_target(target: Unit) -> Dictionary:
 	if stats.ap < weapon.ap_cost:
 		return {"reason": "not_enough_ap"}
 	var dist: int = HexCoord.distance(axial_pos, target.axial_pos)
-	if dist > weapon.range:
+	if dist > weapon.attack_range:
 		return {"reason": "out_of_range"}
 
 	stats.spend_ap(weapon.ap_cost)

@@ -48,11 +48,11 @@ func _spawn_units() -> void:
 	_create_unit("强盗矛兵", 1, Vector2i(2, 0), "spear", "leather_armor", {"hp": 60, "melee": 50, "def": 15, "init": 100})
 
 
-func _create_unit(name: String, faction: int, axial: Vector2i, weapon_id: String, armor_id: String, params: Dictionary) -> Unit:
+func _create_unit(unit_name: String, faction: int, axial: Vector2i, weapon_id: String, armor_id: String, params: Dictionary) -> Unit:
 	var unit := Unit.new()
 	# Stats
 	var stats := Stats.new()
-	stats.unit_name = name
+	stats.unit_name = unit_name
 	stats.faction = faction
 	stats.max_hp = params.get("hp", 60)
 	stats.melee_skill = params.get("melee", 55)
@@ -99,7 +99,7 @@ func _on_hex_clicked(axial: Vector2i) -> void:
 
 	# 点到敌方 → 尝试攻击
 	if clicked_unit and clicked_unit.get_faction() != current.get_faction():
-		if HexCoord.distance(current.axial_pos, axial) <= current.weapon.range and current.stats.ap >= current.weapon.ap_cost:
+		if HexCoord.distance(current.axial_pos, axial) <= current.weapon.attack_range and current.stats.ap >= current.weapon.ap_cost:
 			_player_attack(current, clicked_unit)
 			return
 
@@ -111,6 +111,7 @@ func _on_hex_clicked(axial: Vector2i) -> void:
 	# 点到空格 → 尝试移动
 	if clicked_unit == null and _selected_unit == current:
 		var path: Array[Vector2i] = hex_grid.find_path(current.axial_pos, axial, current.axial_pos)
+		@warning_ignore("integer_division")
 		var max_steps: int = current.stats.ap / Unit.AP_PER_HEX
 		if not path.is_empty() and path.size() <= max_steps:
 			_player_move(current, path)
@@ -127,8 +128,8 @@ func _player_move(unit: Unit, path: Array[Vector2i]) -> void:
 	if unit.is_alive():
 		# 仍可继续行动（攻击/再走）— 只要 AP 够
 		_select_unit(unit)
-		# 没 AP 了就结束回合
-		if unit.stats.ap < 1:
+		# 既走不动也打不出，自动结束回合
+		if unit.stats.ap < Unit.AP_PER_HEX and unit.stats.ap < unit.weapon.ap_cost:
 			unit.end_turn()
 
 
@@ -141,7 +142,8 @@ func _player_attack(unit: Unit, target: Unit) -> void:
 		return  # 战斗结束等
 	if unit.is_alive():
 		_select_unit(unit)
-		if unit.stats.ap < unit.weapon.ap_cost and unit.stats.ap < 1:
+		# 既走不动也打不出，自动结束回合
+		if unit.stats.ap < Unit.AP_PER_HEX and unit.stats.ap < unit.weapon.ap_cost:
 			unit.end_turn()
 
 
@@ -151,11 +153,12 @@ func _select_unit(unit: Unit) -> void:
 	hex_grid.clear_highlights()
 	hex_grid.set_selected(unit.axial_pos)
 	# 移动范围
+	@warning_ignore("integer_division")
 	var max_steps: int = unit.stats.ap / Unit.AP_PER_HEX
 	var move_hexes: Array[Vector2i] = hex_grid.get_reachable(unit.axial_pos, max_steps)
 	hex_grid.set_highlight_move(move_hexes)
 	# 攻击范围
-	var atk_hexes: Array[Vector2i] = hex_grid.get_attack_targets(unit.axial_pos, unit.weapon.range, unit.get_faction())
+	var atk_hexes: Array[Vector2i] = hex_grid.get_attack_targets(unit.axial_pos, unit.weapon.attack_range, unit.get_faction())
 	hex_grid.set_highlight_attack(atk_hexes)
 
 
@@ -178,7 +181,7 @@ func _run_ai_turn(unit: Unit) -> void:
 
 	# 在攻击范围 → 直接打
 	var dist: int = HexCoord.distance(unit.axial_pos, target.axial_pos)
-	if dist <= unit.weapon.range and unit.stats.ap >= unit.weapon.ap_cost:
+	if dist <= unit.weapon.attack_range and unit.stats.ap >= unit.weapon.ap_cost:
 		var result: Dictionary = unit.attack_target(target)
 		unit_panel.append_log(DamageSystem.format_attack_log(result))
 		await get_tree().create_timer(0.5).timeout
@@ -198,6 +201,7 @@ func _run_ai_turn(unit: Unit) -> void:
 		_ai_acting = false
 		return
 	# 路径终点是 target 占用格 → 截断到攻击范围以内
+	@warning_ignore("integer_division")
 	var max_steps: int = unit.stats.ap / Unit.AP_PER_HEX
 	var trimmed: Array[Vector2i] = []
 	for step in path:
@@ -206,7 +210,7 @@ func _run_ai_turn(unit: Unit) -> void:
 		trimmed.append(step)
 		if trimmed.size() >= max_steps:
 			break
-		if HexCoord.distance(step, target.axial_pos) <= unit.weapon.range:
+		if HexCoord.distance(step, target.axial_pos) <= unit.weapon.attack_range:
 			# 走到攻击范围就停下
 			break
 	if trimmed.is_empty():
@@ -219,7 +223,7 @@ func _run_ai_turn(unit: Unit) -> void:
 	# 走完看能不能打
 	if unit.is_alive() and target.is_alive():
 		var d: int = HexCoord.distance(unit.axial_pos, target.axial_pos)
-		if d <= unit.weapon.range and unit.stats.ap >= unit.weapon.ap_cost:
+		if d <= unit.weapon.attack_range and unit.stats.ap >= unit.weapon.ap_cost:
 			var result: Dictionary = unit.attack_target(target)
 			unit_panel.append_log(DamageSystem.format_attack_log(result))
 			await get_tree().create_timer(0.5).timeout
