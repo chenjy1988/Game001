@@ -228,7 +228,8 @@ func get_zoc_cells_of(enemy_faction: int) -> Array[Vector2i]:
 
 ## 沿一条路径走，识别每一步会触发哪些敌人借机攻击。
 ## 返回 Array[Dictionary]，每一步一个：{from, to, oa_attackers: Array[Unit]}
-## 触发条件：上一格被某敌人控制，下一格不再被同一敌人控制（= 离开 ZoC）。
+## 触发条件：本格（出发格）被某敌人控制 → 该敌人触发借机攻击
+##           （比战兄弟严格：只要在 ZoC 内移动，不论是否离开都触发）
 func analyze_path_oa(start: Vector2i, path: Array[Vector2i], self_faction: int) -> Array:
 	var steps: Array = []
 	var prev: Vector2i = start
@@ -236,9 +237,7 @@ func analyze_path_oa(start: Vector2i, path: Array[Vector2i], self_faction: int) 
 		var oa_list: Array = []
 		var prev_ctrls: Array = get_zoc_controllers(prev, self_faction)
 		for ctrl in prev_ctrls:
-			# 离开 ctrl 的 ZoC = step 不再与 ctrl 相邻
-			if HexCoord.distance(step, ctrl.axial_pos) > 1:
-				oa_list.append(ctrl)
+			oa_list.append(ctrl)
 		steps.append({"from": prev, "to": step, "oa_attackers": oa_list})
 		prev = step
 	return steps

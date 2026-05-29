@@ -82,28 +82,28 @@ func move_along_path(path: Array[Vector2i]) -> bool:
 func _animate_path(path: Array[Vector2i]) -> void:
 	var from: Vector2i = axial_pos
 	for step in path:
-		# 1) 出发前：本格被哪些敌人控制？（站定时点的 ZoC 才算）
+		# 1) 出发前：本格被哪些敌人控制？
 		var prev_ctrls: Array = hex_grid.get_zoc_controllers(axial_pos, get_faction())
 
 		# 2) 预扣本步 AP / 疲劳（命中即停时退还）
 		stats.spend_ap(AP_PER_HEX)
 		stats.add_fatigue(FATIGUE_PER_HEX)
 
-		# 3) 触发借机攻击：上一格相邻的敌人，若 step 与之不再相邻 = 离开 ZoC
+		# 3) 触发借机攻击：本格被任意敌人控制就触发该敌人一次借机攻击
+		#    （比战兄弟原版更严格 —— 在 ZoC 内任何方向移动都触发，不只是"离开"）
 		var hit_blocked: bool = false
 		for ctrl in prev_ctrls:
 			if not is_alive():
 				break
-			if HexCoord.distance(step, ctrl.axial_pos) > 1:
-				var oa_result: Dictionary = DamageSystem.execute_attack(ctrl, self)
-				oa_result["is_opportunity_attack"] = true
-				_apply_attack_result(ctrl, self, oa_result)
-				ctrl.attacked.emit(ctrl, self, oa_result)
-				# 命中即停：被任意一次借机攻击命中 → 中断剩余路径
-				if oa_result.get("hit", false):
-					hit_blocked = true
-				if not is_alive():
-					break
+			var oa_result: Dictionary = DamageSystem.execute_attack(ctrl, self)
+			oa_result["is_opportunity_attack"] = true
+			_apply_attack_result(ctrl, self, oa_result)
+			ctrl.attacked.emit(ctrl, self, oa_result)
+			# 命中即停：被任意一次借机攻击命中 → 中断剩余路径
+			if oa_result.get("hit", false):
+				hit_blocked = true
+			if not is_alive():
+				break
 
 		# 被打死或被命中阻挡 → 退还本步 AP/疲劳，不进入新格
 		if hit_blocked or not is_alive():
