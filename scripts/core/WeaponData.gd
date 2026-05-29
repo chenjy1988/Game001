@@ -31,7 +31,7 @@ class_name WeaponData
 @export var fatigue_cost: int = 6
 
 ## 攻击距离（hex 格数），近战为 1，长矛为 2，远程更远
-@export var range: int = 1
+@export var attack_range: int = 1
 
 ## 头部命中伤害倍率（战兄弟规则：头部伤害 +50%）
 @export var head_damage_mult: float = 1.5

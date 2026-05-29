@@ -1,4 +1,4 @@
-[gd_scene load_steps=2 format=3 uid="uid://b2x8main0godot"]
+[gd_scene load_steps=2 format=3 uid="uid://dy4kfnu7ym8cd"]
 
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1_main"]
 
@@ -17,8 +17,8 @@ anchors_preset = 10
 anchor_right = 1.0
 offset_top = 140.0
 offset_bottom = 220.0
-theme_override_font_sizes/font_size = 48
 theme_override_colors/font_color = Color(0.83, 0.69, 0.22, 1)
+theme_override_font_sizes/font_size = 48
 text = "Game001"
 horizontal_alignment = 1
 vertical_alignment = 1
@@ -28,8 +28,8 @@ anchors_preset = 10
 anchor_right = 1.0
 offset_top = 220.0
 offset_bottom = 264.0
-theme_override_font_sizes/font_size = 22
 theme_override_colors/font_color = Color(0.91, 0.88, 0.81, 1)
+theme_override_font_sizes/font_size = 22
 text = "Battle Brothers — Demo"
 horizontal_alignment = 1
 vertical_alignment = 1
@@ -39,8 +39,8 @@ anchors_preset = 10
 anchor_right = 1.0
 offset_top = 270.0
 offset_bottom = 300.0
-theme_override_font_sizes/font_size = 14
 theme_override_colors/font_color = Color(0.55, 0.55, 0.55, 1)
+theme_override_font_sizes/font_size = 14
 text = "Phase 1 — 战斗核心 MVP：Initiative · 移动 · 攻击 · 命中 · 破甲管线"
 horizontal_alignment = 1
 
@@ -63,8 +63,8 @@ anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_top = -60.0
-theme_override_font_sizes/font_size = 12
 theme_override_colors/font_color = Color(0.45, 0.45, 0.45, 1)
+theme_override_font_sizes/font_size = 12
 text = "Enter / Space 开始    ESC 退出"
 horizontal_alignment = 1
 vertical_alignment = 1

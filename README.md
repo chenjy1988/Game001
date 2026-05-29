@@ -95,8 +95,8 @@ Game001/
 │   └── ui/
 │       └── UnitPanel.gd
 └── data/                      # 数据驱动配置
-    ├── weapons.json
-    └── armors.json
+	├── weapons.json
+	└── armors.json
 ```
 
 ## 启动开发

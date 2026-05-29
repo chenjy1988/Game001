@@ -1,6 +1,10 @@
 ; Engine configuration file.
-; Godot 4.3
-; Battle Brothers-like Tactical RPG Demo
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
 
 config_version=5
 
@@ -21,7 +25,6 @@ WeaponArmorDB="*res://scripts/data/WeaponArmorDB.gd"
 window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
-window/stretch/aspect="keep"
 
 [rendering]
 

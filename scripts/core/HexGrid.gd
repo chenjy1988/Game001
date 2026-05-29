@@ -220,16 +220,20 @@ func world_to_axial(world_pos: Vector2) -> Vector2i:
 
 
 # ──────────── 输入处理 ────────────
-func _unhandled_input(event: InputEvent) -> void:
+## 注意：event.position 是 viewport 坐标，不是世界坐标。
+## 用 get_global_mouse_position() 拿到真正的世界坐标（已包含 Camera 偏移修正）。
+## 用 _input 而非 _unhandled_input，避免被 Control 节点（如 ColorRect 背景）静默拦截。
+## 我们靠 _hexes.has(ax) 自己判断是否在地图内，UI 区域的过滤交给 BattleScene 用更精确的方式做。
+func _input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
-		var ax: Vector2i = world_to_axial(event.position)
+		var ax: Vector2i = world_to_axial(get_global_mouse_position())
 		if _hover_hex != ax:
 			_hover_hex = ax
 			queue_redraw()
 			if _hexes.has(ax):
 				hex_hovered.emit(ax)
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		var ax: Vector2i = world_to_axial(event.position)
+		var ax: Vector2i = world_to_axial(get_global_mouse_position())
 		if _hexes.has(ax):
 			hex_clicked.emit(ax)
 

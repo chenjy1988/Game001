@@ -38,7 +38,7 @@ func _load_weapons() -> void:
 		w.armor_penetration = float(entry.get("armor_penetration", 0.0))
 		w.ap_cost = int(entry.get("ap_cost", 4))
 		w.fatigue_cost = int(entry.get("fatigue_cost", 6))
-		w.range = int(entry.get("range", 1))
+		w.attack_range = int(entry.get("range", 1))
 		w.head_damage_mult = float(entry.get("head_damage_mult", 1.5))
 		w.weapon_type = entry.get("weapon_type", "melee")
 		_weapons[w.id] = w
