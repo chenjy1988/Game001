@@ -16,7 +16,7 @@ class_name BattleAI
 ##
 
 const SCORE_KILL_BONUS: float = 50.0
-const SCORE_OA_PER_HIT: float = -18.0          ## 每个借机攻击 -18 分
+const SCORE_OA_PER_HIT: float = -35.0          ## 命中即停规则下，每个借机攻击 -35 分（避免一次失败的撤退耗光行动）
 const SCORE_PER_MOVE_HEX: float = -0.4         ## 移动一格小惩罚
 const SCORE_END_IN_ENEMY_ZOC: float = -6.0     ## 落点处在另一个 ZoC 中 -6
 const SCORE_LOW_HP_FOCUS_WEIGHT: float = 0.5   ## 目标HP越低，伤害权重提升

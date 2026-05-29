@@ -66,7 +66,7 @@ func end_turn() -> void:
 # ──────────── 移动 ────────────
 ## 沿路径异步移动；返回是否成功开始移动。
 ## 每走一步检查"是否离开了某个敌人的 ZoC"，触发借机攻击；
-## 被借机攻击打死则中断剩余路径。
+## 借机攻击命中（或打死）→ 中断剩余路径，未消耗的 AP/疲劳保留。
 func move_along_path(path: Array[Vector2i]) -> bool:
 	if path.is_empty() or not is_alive():
 		return false
@@ -85,11 +85,12 @@ func _animate_path(path: Array[Vector2i]) -> void:
 		# 1) 出发前：本格被哪些敌人控制？（站定时点的 ZoC 才算）
 		var prev_ctrls: Array = hex_grid.get_zoc_controllers(axial_pos, get_faction())
 
-		# 2) 扣本步 AP / 疲劳
+		# 2) 预扣本步 AP / 疲劳（命中即停时退还）
 		stats.spend_ap(AP_PER_HEX)
 		stats.add_fatigue(FATIGUE_PER_HEX)
 
 		# 3) 触发借机攻击：上一格相邻的敌人，若 step 与之不再相邻 = 离开 ZoC
+		var hit_blocked: bool = false
 		for ctrl in prev_ctrls:
 			if not is_alive():
 				break
@@ -98,11 +99,16 @@ func _animate_path(path: Array[Vector2i]) -> void:
 				oa_result["is_opportunity_attack"] = true
 				_apply_attack_result(ctrl, self, oa_result)
 				ctrl.attacked.emit(ctrl, self, oa_result)
+				# 命中即停：被任意一次借机攻击命中 → 中断剩余路径
+				if oa_result.get("hit", false):
+					hit_blocked = true
 				if not is_alive():
 					break
 
-		# 被打死了则不再前进
-		if not is_alive():
+		# 被打死或被命中阻挡 → 退还本步 AP/疲劳，不进入新格
+		if hit_blocked or not is_alive():
+			stats.ap += AP_PER_HEX
+			stats.fatigue = max(0, stats.fatigue - FATIGUE_PER_HEX)
 			stats_changed.emit(self)
 			return
 
