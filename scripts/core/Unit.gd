@@ -237,59 +237,111 @@ func _draw() -> void:
 	# 应用视觉 offset（受击抖动、出击 lunge）
 	if _visual_offset != Vector2.ZERO:
 		draw_set_transform(_visual_offset, 0.0, Vector2.ONE)
-	# 阵营色
-	var body_color: Color
-	var border_color: Color
-	var glow_color: Color
-	if get_faction() == 0:
-		body_color = Color(0.29, 0.56, 0.85)
-		border_color = Color(0.85, 0.92, 1.0)
-		glow_color = Color(0.45, 0.75, 1.0)
-	else:
-		body_color = Color(0.78, 0.22, 0.22)
-		border_color = Color(1.0, 0.85, 0.85)
-		glow_color = Color(1.0, 0.45, 0.40)
 
 	var t_ms: float = float(Time.get_ticks_msec())
 	var breath: float = 0.5 + 0.5 * sin(t_ms / 380.0)
 
-	# ---- 1) 投影（椭圆，更柔，多层叠加） ----
-	var shadow_center := Vector2(2, UNIT_RADIUS - 2)
-	# 外层柔（大半径，淡 alpha）
-	draw_circle(shadow_center, UNIT_RADIUS * 1.1, Color(0, 0, 0, 0.18))
-	# 内层实（小半径，深 alpha）
-	draw_circle(shadow_center + Vector2(0, 1), UNIT_RADIUS * 0.85, Color(0, 0, 0, 0.42))
+	# 阵营色板
+	var tunic_color: Color
+	var tunic_dark: Color
+	var trim_color: Color
+	var glow_color: Color
+	if get_faction() == 0:
+		tunic_color = Color(0.30, 0.52, 0.82)
+		tunic_dark  = Color(0.18, 0.32, 0.55)
+		trim_color  = Color(0.83, 0.70, 0.30)
+		glow_color  = Color(0.45, 0.75, 1.0)
+	else:
+		tunic_color = Color(0.72, 0.24, 0.24)
+		tunic_dark  = Color(0.45, 0.13, 0.13)
+		trim_color  = Color(0.20, 0.18, 0.14)
+		glow_color  = Color(1.0, 0.45, 0.40)
 
-	# ---- 2) 当前回合：外圈柔光 ----
+	var skin_color := Color(0.92, 0.78, 0.62)
+	var skin_dark  := Color(0.70, 0.55, 0.42)
+	var helmet_color: Color
+	var helmet_visible: bool = true
+	var w: int = armor.weight if armor else 0
+	if w <= 0:
+		helmet_visible = false
+		helmet_color = Color(0.6, 0.5, 0.4)
+	elif w <= 6:
+		helmet_color = Color(0.40, 0.28, 0.18)
+	elif w <= 14:
+		helmet_color = Color(0.55, 0.55, 0.60)
+	else:
+		helmet_color = Color(0.75, 0.76, 0.80)
+
+	# 1) 投影
+	var shadow_y: float = 18.0
+	draw_circle(Vector2(1, shadow_y), 14.0, Color(0, 0, 0, 0.18))
+	draw_circle(Vector2(0, shadow_y + 1), 10.0, Color(0, 0, 0, 0.40))
+
+	# 2) 当前回合：脚下扇形柔光
 	if is_active_turn:
-		var glow_r: float = UNIT_RADIUS + 6.0 + breath * 2.5
-		draw_circle(Vector2.ZERO, glow_r,
-			Color(glow_color.r, glow_color.g, glow_color.b, 0.20 + 0.12 * breath))
+		var glow_r: float = 18.0 + breath * 3.0
+		draw_circle(Vector2(0, shadow_y), glow_r,
+			Color(glow_color.r, glow_color.g, glow_color.b, 0.20 + 0.10 * breath))
 
-	# ---- 3) 主体（带渐变高光：先画暗色底，再叠亮色高光） ----
-	# 底色（稍暗）
-	draw_circle(Vector2.ZERO, UNIT_RADIUS,
-		Color(body_color.r * 0.75, body_color.g * 0.75, body_color.b * 0.75))
-	# 顶部高光（小圆偏上）
-	draw_circle(Vector2(-3, -4), UNIT_RADIUS * 0.65, body_color)
-	# 顶部白光点
-	draw_circle(Vector2(-5, -6), UNIT_RADIUS * 0.22,
-		Color(1.0, 1.0, 1.0, 0.35))
+	# 3) 腿
+	var pants_color := Color(0.22, 0.18, 0.14)
+	var pants_hl    := Color(0.32, 0.27, 0.22)
+	draw_rect(Rect2(Vector2(-5, 6), Vector2(4, 12)), pants_color, true)
+	draw_rect(Rect2(Vector2( 1, 6), Vector2(4, 12)), pants_color, true)
+	draw_line(Vector2(-5, 6), Vector2(-5, 17), pants_hl, 1.0)
+	draw_line(Vector2( 1, 6), Vector2( 1, 17), pants_hl, 1.0)
+	draw_rect(Rect2(Vector2(-6, 16), Vector2(5, 3)), Color(0.10, 0.08, 0.06), true)
+	draw_rect(Rect2(Vector2( 1, 16), Vector2(5, 3)), Color(0.10, 0.08, 0.06), true)
 
-	# ---- 4) 描边 ----
-	draw_arc(Vector2.ZERO, UNIT_RADIUS, 0, TAU, 36, border_color, 2.2, true)
+	# 4) 躯干（梯形）
+	var torso_pts := PackedVector2Array([
+		Vector2(-6, -6), Vector2( 6, -6),
+		Vector2( 8,  6), Vector2(-8,  6),
+	])
+	draw_colored_polygon(torso_pts, tunic_color)
+	var torso_shadow_pts := PackedVector2Array([
+		Vector2( 2, -6), Vector2( 6, -6),
+		Vector2( 8,  6), Vector2( 4,  6),
+	])
+	draw_colored_polygon(torso_shadow_pts, tunic_dark)
+	draw_rect(Rect2(Vector2(-8, 4), Vector2(16, 2.5)), trim_color, true)
+	if w > 8:
+		var plate_pts := PackedVector2Array([
+			Vector2(-4, -4), Vector2( 4, -4),
+			Vector2( 5,  3), Vector2(-5,  3),
+		])
+		draw_colored_polygon(plate_pts,
+			Color(helmet_color.r, helmet_color.g, helmet_color.b, 0.55))
+		draw_line(Vector2(-3, -3), Vector2(0, 2), Color(0, 0, 0, 0.4), 1.0)
+		draw_line(Vector2( 3, -3), Vector2(0, 2), Color(0, 0, 0, 0.4), 1.0)
 
-	# ---- 5) HP 微条（脚下，带描边） ----
+	# 5) 头 + 脖子
+	draw_rect(Rect2(Vector2(-2, -8), Vector2(4, 2)), skin_dark, true)
+	draw_circle(Vector2(0, -12), 5.0, skin_color)
+	draw_rect(Rect2(Vector2(-2.5, -13), Vector2(1, 1)), Color(0.1, 0.05, 0.0), true)
+	draw_rect(Rect2(Vector2( 1.5, -13), Vector2(1, 1)), Color(0.1, 0.05, 0.0), true)
+
+	# 6) 头盔
+	if helmet_visible:
+		draw_circle(Vector2(0, -13), 5.5, helmet_color)
+		draw_rect(Rect2(Vector2(-6, -11), Vector2(12, 1.5)),
+			Color(helmet_color.r * 0.7, helmet_color.g * 0.7, helmet_color.b * 0.7), true)
+		if w > 14:
+			draw_line(Vector2(0, -13), Vector2(0, -9),
+				Color(helmet_color.r * 0.5, helmet_color.g * 0.5, helmet_color.b * 0.5), 1.5)
+
+	# 7) 武器
+	_draw_weapon()
+
+	# 8) HP 微条
 	var hp_ratio: float = clamp(float(stats.hp) / float(stats.max_hp), 0.0, 1.0)
 	var bar_w: float = 30.0
-	var bar_h: float = 5.0
-	var bar_origin := Vector2(-bar_w * 0.5, UNIT_RADIUS + 5.0)
-	# 背板
+	var bar_h: float = 4.0
+	var bar_origin := Vector2(-bar_w * 0.5, 22.0)
 	draw_rect(Rect2(bar_origin - Vector2(1, 1), Vector2(bar_w + 2, bar_h + 2)),
 		Color(0, 0, 0, 0.75), true)
 	draw_rect(Rect2(bar_origin, Vector2(bar_w, bar_h)),
 		Color(0.18, 0.10, 0.10, 1.0), true)
-	# 填充（根据 hp_ratio 变色：高=红，中=橙，低=深红）
 	var fill_color: Color = Color(0.85, 0.22, 0.22)
 	if hp_ratio < 0.3:
 		fill_color = Color(0.65, 0.15, 0.15)
@@ -297,24 +349,95 @@ func _draw() -> void:
 		fill_color = Color(0.95, 0.45, 0.20)
 	draw_rect(Rect2(bar_origin, Vector2(bar_w * hp_ratio, bar_h)), fill_color, true)
 
-	# ---- 6) 当前回合：头顶向下箭头（▼） ----
+	# 9) 当前回合：头顶箭头
 	if is_active_turn:
-		var arrow_y: float = -UNIT_RADIUS - 12.0 - breath * 3.0
+		var arrow_y: float = -22.0 - breath * 3.0
 		var arrow_pts := PackedVector2Array([
-			Vector2(-6, arrow_y),
-			Vector2( 6, arrow_y),
-			Vector2( 0, arrow_y + 8),
+			Vector2(-6, arrow_y), Vector2( 6, arrow_y), Vector2( 0, arrow_y + 8),
 		])
-		# 阴影
 		var shadow_pts := PackedVector2Array([
 			arrow_pts[0] + Vector2(1, 1),
 			arrow_pts[1] + Vector2(1, 1),
 			arrow_pts[2] + Vector2(1, 1),
 		])
 		draw_colored_polygon(shadow_pts, Color(0, 0, 0, 0.55))
-		# 箭头本体（金色）
 		draw_colored_polygon(arrow_pts, Color(0.95, 0.82, 0.35, 0.95))
-		# 箭头描边
 		var arrow_outline := arrow_pts.duplicate()
 		arrow_outline.append(arrow_pts[0])
 		draw_polyline(arrow_outline, Color(0.55, 0.40, 0.10, 0.9), 1.2, true)
+
+
+# ──────────── 武器绘制（区分类型） ────────────
+func _draw_weapon() -> void:
+	if weapon == null:
+		return
+	var hand: Vector2 = Vector2(8, -2)
+	var wid: String = weapon.id
+	match wid:
+		"short_sword":
+			_draw_sword(hand, 14.0, 2.4, 8.0, Color(0.78, 0.80, 0.85))
+		"war_hammer":
+			_draw_hammer(hand, 14.0, Color(0.45, 0.42, 0.38))
+		"dagger":
+			_draw_sword(hand, 8.0, 2.0, 5.0, Color(0.85, 0.86, 0.90))
+		"spear":
+			_draw_spear(hand, 20.0)
+		"battle_axe":
+			_draw_axe(hand, 14.0)
+		_:
+			_draw_sword(hand, 12.0, 2.0, 6.0, Color(0.75, 0.78, 0.82))
+
+
+func _draw_sword(hand: Vector2, length: float, blade_w: float, guard_w: float, blade_color: Color) -> void:
+	draw_rect(Rect2(hand + Vector2(-1, -1), Vector2(2.5, 5)), Color(0.30, 0.20, 0.10), true)
+	draw_rect(Rect2(hand + Vector2(-guard_w * 0.5, -2), Vector2(guard_w, 1.5)),
+		Color(0.50, 0.40, 0.20), true)
+	var blade_top: Vector2 = hand + Vector2(0.25, -2 - length)
+	var blade_rect := Rect2(hand + Vector2(-blade_w * 0.5 + 0.25, -2 - length), Vector2(blade_w, length))
+	draw_rect(blade_rect, blade_color, true)
+	draw_line(blade_top, blade_top + Vector2(blade_w * 0.5, 2),
+		Color(blade_color.r * 0.6, blade_color.g * 0.6, blade_color.b * 0.6), 1.0)
+	draw_line(blade_top + Vector2(-blade_w * 0.5, 1),
+		blade_top + Vector2(-blade_w * 0.5, length - 1),
+		Color(1, 1, 1, 0.6), 1.0)
+
+
+func _draw_hammer(hand: Vector2, shaft_len: float, head_color: Color) -> void:
+	draw_line(hand, hand + Vector2(0, -shaft_len), Color(0.40, 0.28, 0.18), 2.0)
+	var head_y: float = hand.y - shaft_len
+	draw_rect(Rect2(Vector2(hand.x - 5, head_y - 3), Vector2(10, 6)), head_color, true)
+	draw_rect(Rect2(Vector2(hand.x - 5, head_y - 3), Vector2(10, 1.5)),
+		Color(head_color.r * 1.3, head_color.g * 1.3, head_color.b * 1.3), true)
+
+
+func _draw_spear(hand: Vector2, shaft_len: float) -> void:
+	draw_line(hand + Vector2(0, 2), hand + Vector2(0, -shaft_len),
+		Color(0.40, 0.28, 0.18), 1.6)
+	var tip: Vector2 = hand + Vector2(0, -shaft_len - 5)
+	var head_pts := PackedVector2Array([
+		tip,
+		hand + Vector2(-2.5, -shaft_len),
+		hand + Vector2( 2.5, -shaft_len),
+	])
+	draw_colored_polygon(head_pts, Color(0.80, 0.82, 0.86))
+	var head_outline := head_pts.duplicate()
+	head_outline.append(head_pts[0])
+	draw_polyline(head_outline, Color(0.40, 0.42, 0.46), 1.0, true)
+
+
+func _draw_axe(hand: Vector2, shaft_len: float) -> void:
+	draw_line(hand, hand + Vector2(0, -shaft_len), Color(0.40, 0.28, 0.18), 2.0)
+	var head_y: float = hand.y - shaft_len + 2
+	var head_pts := PackedVector2Array([
+		Vector2(hand.x + 1, head_y),
+		Vector2(hand.x + 9, head_y - 3),
+		Vector2(hand.x + 10, head_y + 1),
+		Vector2(hand.x + 9, head_y + 5),
+		Vector2(hand.x + 1, head_y + 4),
+	])
+	draw_colored_polygon(head_pts, Color(0.55, 0.55, 0.58))
+	var head_outline := head_pts.duplicate()
+	head_outline.append(head_pts[0])
+	draw_polyline(head_outline, Color(0.30, 0.30, 0.32), 1.0, true)
+	draw_line(Vector2(hand.x + 9, head_y - 2), Vector2(hand.x + 9, head_y + 4),
+		Color(1, 1, 1, 0.6), 1.0)
