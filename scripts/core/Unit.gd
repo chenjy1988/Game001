@@ -171,29 +171,104 @@ func attack_target(target: Unit) -> Dictionary:
 # ──────────── 渲染 ────────────
 const UNIT_RADIUS: float = 16.0
 
+## 当前回合标记（由 BattleScene 设置），决定要不要画顶部箭头
+var is_active_turn: bool = false
+
+
+func set_active_turn(active: bool) -> void:
+	if is_active_turn == active:
+		return
+	is_active_turn = active
+	queue_redraw()
+
+
+func _process(_delta: float) -> void:
+	# 当前回合单位有箭头呼吸动画，需要持续重绘
+	if is_active_turn and is_alive():
+		queue_redraw()
+
 
 func _draw() -> void:
 	if not is_alive():
 		return
-	# 阵营颜色
+	# 阵营色
 	var body_color: Color
 	var border_color: Color
+	var glow_color: Color
 	if get_faction() == 0:
-		body_color = Color(0.29, 0.56, 0.85)         # 友方蓝
+		body_color = Color(0.29, 0.56, 0.85)
 		border_color = Color(0.85, 0.92, 1.0)
+		glow_color = Color(0.45, 0.75, 1.0)
 	else:
-		body_color = Color(0.78, 0.22, 0.22)         # 敌方红
+		body_color = Color(0.78, 0.22, 0.22)
 		border_color = Color(1.0, 0.85, 0.85)
-	# 阴影
-	draw_circle(Vector2(2, 2), UNIT_RADIUS, Color(0, 0, 0, 0.55))
-	# 主体
-	draw_circle(Vector2.ZERO, UNIT_RADIUS, body_color)
-	# 边框
-	draw_arc(Vector2.ZERO, UNIT_RADIUS, 0, TAU, 32, border_color, 2.0, true)
-	# HP 微条（在脚下）
+		glow_color = Color(1.0, 0.45, 0.40)
+
+	var t_ms: float = float(Time.get_ticks_msec())
+	var breath: float = 0.5 + 0.5 * sin(t_ms / 380.0)
+
+	# ---- 1) 投影（椭圆，更柔，多层叠加） ----
+	var shadow_center := Vector2(2, UNIT_RADIUS - 2)
+	# 外层柔（大半径，淡 alpha）
+	draw_circle(shadow_center, UNIT_RADIUS * 1.1, Color(0, 0, 0, 0.18))
+	# 内层实（小半径，深 alpha）
+	draw_circle(shadow_center + Vector2(0, 1), UNIT_RADIUS * 0.85, Color(0, 0, 0, 0.42))
+
+	# ---- 2) 当前回合：外圈柔光 ----
+	if is_active_turn:
+		var glow_r: float = UNIT_RADIUS + 6.0 + breath * 2.5
+		draw_circle(Vector2.ZERO, glow_r,
+			Color(glow_color.r, glow_color.g, glow_color.b, 0.20 + 0.12 * breath))
+
+	# ---- 3) 主体（带渐变高光：先画暗色底，再叠亮色高光） ----
+	# 底色（稍暗）
+	draw_circle(Vector2.ZERO, UNIT_RADIUS,
+		Color(body_color.r * 0.75, body_color.g * 0.75, body_color.b * 0.75))
+	# 顶部高光（小圆偏上）
+	draw_circle(Vector2(-3, -4), UNIT_RADIUS * 0.65, body_color)
+	# 顶部白光点
+	draw_circle(Vector2(-5, -6), UNIT_RADIUS * 0.22,
+		Color(1.0, 1.0, 1.0, 0.35))
+
+	# ---- 4) 描边 ----
+	draw_arc(Vector2.ZERO, UNIT_RADIUS, 0, TAU, 36, border_color, 2.2, true)
+
+	# ---- 5) HP 微条（脚下，带描边） ----
 	var hp_ratio: float = clamp(float(stats.hp) / float(stats.max_hp), 0.0, 1.0)
-	var bar_w: float = 28.0
-	var bar_h: float = 4.0
-	var bar_origin := Vector2(-bar_w * 0.5, UNIT_RADIUS + 4.0)
-	draw_rect(Rect2(bar_origin, Vector2(bar_w, bar_h)), Color(0, 0, 0, 0.7), true)
-	draw_rect(Rect2(bar_origin, Vector2(bar_w * hp_ratio, bar_h)), Color(0.85, 0.22, 0.22), true)
+	var bar_w: float = 30.0
+	var bar_h: float = 5.0
+	var bar_origin := Vector2(-bar_w * 0.5, UNIT_RADIUS + 5.0)
+	# 背板
+	draw_rect(Rect2(bar_origin - Vector2(1, 1), Vector2(bar_w + 2, bar_h + 2)),
+		Color(0, 0, 0, 0.75), true)
+	draw_rect(Rect2(bar_origin, Vector2(bar_w, bar_h)),
+		Color(0.18, 0.10, 0.10, 1.0), true)
+	# 填充（根据 hp_ratio 变色：高=红，中=橙，低=深红）
+	var fill_color: Color = Color(0.85, 0.22, 0.22)
+	if hp_ratio < 0.3:
+		fill_color = Color(0.65, 0.15, 0.15)
+	elif hp_ratio < 0.6:
+		fill_color = Color(0.95, 0.45, 0.20)
+	draw_rect(Rect2(bar_origin, Vector2(bar_w * hp_ratio, bar_h)), fill_color, true)
+
+	# ---- 6) 当前回合：头顶向下箭头（▼） ----
+	if is_active_turn:
+		var arrow_y: float = -UNIT_RADIUS - 12.0 - breath * 3.0
+		var arrow_pts := PackedVector2Array([
+			Vector2(-6, arrow_y),
+			Vector2( 6, arrow_y),
+			Vector2( 0, arrow_y + 8),
+		])
+		# 阴影
+		var shadow_pts := PackedVector2Array([
+			arrow_pts[0] + Vector2(1, 1),
+			arrow_pts[1] + Vector2(1, 1),
+			arrow_pts[2] + Vector2(1, 1),
+		])
+		draw_colored_polygon(shadow_pts, Color(0, 0, 0, 0.55))
+		# 箭头本体（金色）
+		draw_colored_polygon(arrow_pts, Color(0.95, 0.82, 0.35, 0.95))
+		# 箭头描边
+		var arrow_outline := arrow_pts.duplicate()
+		arrow_outline.append(arrow_pts[0])
+		draw_polyline(arrow_outline, Color(0.55, 0.40, 0.10, 0.9), 1.2, true)

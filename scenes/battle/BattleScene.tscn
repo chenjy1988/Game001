@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3 uid="uid://b2battle0scene1"]
+[gd_scene load_steps=9 format=3 uid="uid://b2battle0scene1"]
 
 [ext_resource type="Script" path="res://scripts/core/BattleScene.gd" id="1_battle"]
 [ext_resource type="Script" path="res://scripts/core/HexGrid.gd" id="2_hexgrid"]
@@ -6,11 +6,20 @@
 [ext_resource type="Script" path="res://scripts/ui/SidePanel.gd" id="4_side"]
 [ext_resource type="Script" path="res://scripts/ui/TopBar.gd" id="5_top"]
 [ext_resource type="Script" path="res://scripts/ui/UnitTooltip.gd" id="6_tooltip"]
+[ext_resource type="Shader" path="res://scripts/ui/vignette.gdshader" id="7_vignette"]
+
+[sub_resource type="ShaderMaterial" id="VignetteMat"]
+shader = ExtResource("7_vignette")
+shader_parameter/vignette_strength = 0.55
+shader_parameter/vignette_inner = 0.35
+shader_parameter/vignette_outer = 1.10
+shader_parameter/base_color = Color(0.118, 0.106, 0.137, 1)
 
 [node name="BattleScene" type="Node2D"]
 script = ExtResource("1_battle")
 
 [node name="Background" type="ColorRect" parent="."]
+material = SubResource("VignetteMat")
 offset_right = 1280.0
 offset_bottom = 720.0
 mouse_filter = 2

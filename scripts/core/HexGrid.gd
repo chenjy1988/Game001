@@ -313,70 +313,126 @@ func _input(event: InputEvent) -> void:
 
 
 # ──────────── 渲染 ────────────
-func _draw() -> void:
-	# 设计风格：暗黑中世纪，土壤/石板配色
-	var color_base := Color(0.18, 0.16, 0.14)        # 深棕
-	var color_border := Color(0.35, 0.30, 0.22, 0.6) # 暗金边框
-	var color_hover := Color(0.85, 0.69, 0.22, 0.18) # 暗金 hover
-	var color_move := Color(0.29, 0.56, 0.85, 0.35)  # 蓝色移动
-	var color_attack := Color(0.85, 0.29, 0.29, 0.45) # 红色攻击
-	var color_path := Color(0.85, 0.69, 0.22, 0.55)  # 暗金路径
-	var color_zoc := Color(0.95, 0.55, 0.25, 0.20)   # 弱橙：敌方 ZoC
-	var color_oa := Color(1.0, 0.35, 0.25, 0.85)     # 强橙红：借机攻击触发点
-	var color_selected := Color(0.91, 0.88, 0.81, 0.9) # 选中白边
+## 60Hz 推动重绘，用于高亮呼吸/路径动画
+func _process(_delta: float) -> void:
+	if not _highlight_move.is_empty() or not _highlight_attack.is_empty() \
+			or not _highlight_oa_steps.is_empty() or not _highlight_path.is_empty():
+		queue_redraw()
 
-	# 绘制所有 hex
+
+func _draw() -> void:
+	# 暗黑中世纪石板配色
+	var color_base_top := Color(0.24, 0.21, 0.18)      # 顶部稍亮（高光）
+	var color_base_bot := Color(0.13, 0.11, 0.09)      # 底部更暗（阴影）
+	var color_border   := Color(0.42, 0.36, 0.26, 0.75) # 暗金边框
+	var color_inner_hi := Color(0.55, 0.47, 0.32, 0.18) # 内侧高光线
+	var color_hover    := Color(0.95, 0.80, 0.30, 0.22) # 金色 hover
+	var color_move     := Color(0.29, 0.56, 0.85, 0.40) # 蓝色移动
+	var color_attack   := Color(0.85, 0.29, 0.29, 0.50) # 红色攻击
+	var color_path     := Color(0.95, 0.78, 0.30, 0.85) # 金色路径
+	var color_zoc      := Color(0.95, 0.55, 0.25, 0.16) # 弱橙：敌方 ZoC
+	var color_oa       := Color(1.0, 0.40, 0.25, 0.92)  # 强橙红：借机触发点
+	var color_selected := Color(0.95, 0.90, 0.78, 0.95) # 选中白金边
+
+	# 呼吸动画系数（0~1 之间正弦缓动）
+	var t_ms: float = float(Time.get_ticks_msec())
+	var breath: float = 0.5 + 0.5 * sin(t_ms / 380.0)   # 周期约 2.4s
+	var fast_breath: float = 0.5 + 0.5 * sin(t_ms / 220.0) # 更急促，用于 OA/selected
+
+	# ---- 1) 绘制所有 hex 底色（双层叠色模拟内阴影） ----
 	for axial in _hexes.keys():
 		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
 		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
-		# 底色
-		draw_colored_polygon(pts, color_base)
-		# 边框
+		# 底色：先画"阴影色"全填，再画"顶部偏亮"做出立体感
+		draw_colored_polygon(pts, color_base_bot)
+		# 缩小一圈再画亮色 → 形成"内凹"高光
+		var pts_inner: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 3.5)
+		draw_colored_polygon(pts_inner, color_base_top)
+		# 内侧高光线（顶部 3 条边稍亮）
+		_draw_top_highlight(pts_inner, color_inner_hi)
+		# 外边框
 		var pts_closed := pts.duplicate()
 		pts_closed.append(pts[0])
-		draw_polyline(pts_closed, color_border, 1.5, true)
+		draw_polyline(pts_closed, color_border, 1.6, true)
 
-	# 高亮：敌方 ZoC（先画，让 move 蓝叠在上面更直观）
+	# ---- 2) 敌方 ZoC（最底层叠加） ----
 	for axial in _highlight_zoc:
 		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
 		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
 		draw_colored_polygon(pts, color_zoc)
 
-	# 高亮：移动范围
+	# ---- 3) 移动范围（呼吸动画） ----
+	var move_alpha: float = color_move.a * (0.7 + 0.3 * breath)
 	for axial in _highlight_move:
 		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
 		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
-		draw_colored_polygon(pts, color_move)
+		draw_colored_polygon(pts, Color(color_move.r, color_move.g, color_move.b, move_alpha))
 
-	# 高亮：攻击范围
+	# ---- 4) 攻击范围（呼吸 + 内部短描边） ----
+	var atk_alpha: float = color_attack.a * (0.7 + 0.3 * breath)
 	for axial in _highlight_attack:
 		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
 		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
-		draw_colored_polygon(pts, color_attack)
+		draw_colored_polygon(pts, Color(color_attack.r, color_attack.g, color_attack.b, atk_alpha))
+		# 红色细边强化
+		var pts_atk_edge: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 4.0)
+		var pts_closed := pts_atk_edge.duplicate()
+		pts_closed.append(pts_atk_edge[0])
+		draw_polyline(pts_closed, Color(0.95, 0.35, 0.30, 0.5), 1.2, true)
 
-	# 高亮：预览路径
-	for axial in _highlight_path:
+	# ---- 5) 路径（朝下一格的渐进金色三角） ----
+	for i in range(_highlight_path.size()):
+		var axial: Vector2i = _highlight_path[i]
 		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
-		draw_circle(center, 5.0, color_path)
+		# 越靠近终点越亮
+		var t: float = (float(i) + 1.0) / float(_highlight_path.size())
+		var alpha: float = lerp(0.4, 0.95, t)
+		draw_circle(center, 6.0 + breath * 1.5, Color(color_path.r, color_path.g, color_path.b, alpha))
 
-	# 高亮：会触发借机攻击的步格（粗描边警示）
+	# ---- 6) 借机攻击触发点（强烈呼吸 + 双层描边警示） ----
+	var oa_color := Color(color_oa.r, color_oa.g, color_oa.b, color_oa.a * (0.6 + 0.4 * fast_breath))
 	for axial in _highlight_oa_steps:
 		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
-		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 2.5)
-		var pts_closed := pts.duplicate()
-		pts_closed.append(pts[0])
-		draw_polyline(pts_closed, color_oa, 2.5, true)
+		var pts_outer: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 2.0)
+		var pts_inner_warn: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 5.0)
+		var po := pts_outer.duplicate(); po.append(pts_outer[0])
+		var pi := pts_inner_warn.duplicate(); pi.append(pts_inner_warn[0])
+		draw_polyline(po, oa_color, 3.0, true)
+		draw_polyline(pi, Color(oa_color.r, oa_color.g, oa_color.b, oa_color.a * 0.5), 1.2, true)
 
-	# Hover
+	# ---- 7) Hover ----
 	if _hexes.has(_hover_hex):
 		var center: Vector2 = HexCoord.axial_to_pixel(_hover_hex, HEX_SIZE)
 		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
 		draw_colored_polygon(pts, color_hover)
 
-	# 选中
+	# ---- 8) 选中（白金边 + 慢呼吸 + 外圈柔光） ----
 	if _hexes.has(_highlight_selected):
 		var center: Vector2 = HexCoord.axial_to_pixel(_highlight_selected, HEX_SIZE)
+		# 外柔光（更大六边形，alpha 极低）
+		var glow_pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE + 4.0)
+		draw_colored_polygon(glow_pts, Color(1.0, 0.95, 0.75, 0.10 + 0.06 * breath))
+		# 描边
 		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
 		var pts_closed := pts.duplicate()
 		pts_closed.append(pts[0])
-		draw_polyline(pts_closed, color_selected, 2.5, true)
+		draw_polyline(pts_closed, color_selected, 2.8, true)
+
+
+## 在六边形"上半"3 条边沿内侧画一条更亮的细线，营造"内凹光照"感
+func _draw_top_highlight(pts: PackedVector2Array, color: Color) -> void:
+	# pointy-top 六边形的顶点顺序：12点-2点-4点-6点-8点-10点
+	# 上半边 = [10点→12点, 12点→2点, 2点→4点]
+	# 对应索引（HexCoord.corners 从右上开始？）我们保守画 3 段相邻边
+	# 找出 y 最小的顶点作为"顶"，然后向两侧各延伸一条边
+	var top_idx: int = 0
+	for i in range(pts.size()):
+		if pts[i].y < pts[top_idx].y:
+			top_idx = i
+	var idx_prev: int = (top_idx - 1 + pts.size()) % pts.size()
+	var idx_next: int = (top_idx + 1) % pts.size()
+	var idx_prev2: int = (top_idx - 2 + pts.size()) % pts.size()
+	# 画 3 段
+	draw_line(pts[idx_prev2], pts[idx_prev], color, 1.2, true)
+	draw_line(pts[idx_prev],  pts[top_idx],  color, 1.2, true)
+	draw_line(pts[top_idx],   pts[idx_next], color, 1.2, true)

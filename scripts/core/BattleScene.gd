@@ -82,6 +82,9 @@ func _create_unit(unit_name: String, faction: int, axial: Vector2i, weapon_id: S
 # ──────────── 回合控制 ────────────
 func _on_turn_started(unit: Unit) -> void:
 	_clear_selection()
+	# 切换"当前回合"标记（清掉所有人，再点亮当前）
+	for u in _all_units:
+		u.set_active_turn(u == unit)
 	top_bar.set_current_unit(unit, turn_manager.round_num, turn_manager.get_turn_order_preview())
 	unit_panel.bind_unit(unit)
 	if unit.get_faction() == 0:
