@@ -82,9 +82,6 @@ func _create_unit(unit_name: String, faction: int, axial: Vector2i, weapon_id: S
 # ──────────── 回合控制 ────────────
 func _on_turn_started(unit: Unit) -> void:
 	_clear_selection()
-	# 切换"当前回合"标记（清掉所有人，再点亮当前）
-	for u in _all_units:
-		u.set_active_turn(u == unit)
 	top_bar.set_current_unit(unit, turn_manager.round_num, turn_manager.get_turn_order_preview())
 	unit_panel.bind_unit(unit)
 	if unit.get_faction() == 0:
@@ -217,15 +214,65 @@ func _on_hex_hovered(axial: Vector2i) -> void:
 	hex_grid.set_highlight_oa_steps(oa_steps)
 
 
-# tooltip 跟随光标在同 hex 内的细微移动
-func _process(_delta: float) -> void:
+# ──────────── 屏幕震动（暴击/重大命中反馈） ────────────
+var _shake_remaining: float = 0.0
+var _shake_total: float = 0.0
+var _shake_magnitude: float = 0.0
+var _camera_base_offset: Vector2 = Vector2.ZERO
+
+
+func _shake_camera(duration: float, magnitude: float) -> void:
+	if camera == null:
+		return
+	# 叠加规则：取最大剩余时长 + 最大震动幅度
+	if duration > _shake_remaining:
+		_shake_remaining = duration
+		_shake_total = duration
+	_shake_magnitude = max(_shake_magnitude, magnitude)
+
+
+func _process(delta: float) -> void:
+	# tooltip 跟随光标
 	if tooltip and tooltip.visible:
 		tooltip.update_position(get_viewport().get_mouse_position())
+	# 屏幕震动（随时间线性衰减）
+	if _shake_remaining > 0.0 and camera:
+		_shake_remaining = max(0.0, _shake_remaining - delta)
+		if _shake_remaining <= 0.0:
+			camera.offset = _camera_base_offset
+			_shake_magnitude = 0.0
+		else:
+			var fade: float = _shake_remaining / max(0.001, _shake_total)
+			var mag: float = _shake_magnitude * fade
+			camera.offset = _camera_base_offset + Vector2(
+				randf_range(-mag, mag),
+				randf_range(-mag, mag)
+			)
 
 
 # ──────────── 攻击日志 / 死亡通知（正规与借机攻击统一处理） ────────────
-func _on_any_unit_attacked(_attacker: Unit, _target: Unit, result: Dictionary) -> void:
+func _on_any_unit_attacked(attacker: Unit, target: Unit, result: Dictionary) -> void:
 	unit_panel.append_log(DamageSystem.format_attack_log(result))
+	# 视觉反馈
+	if attacker and attacker.is_alive():
+		attacker.play_attack_lunge(target.axial_pos)
+	if target and target.is_alive():
+		var did_hit: bool = result.get("hit", false)
+		var is_crit: bool = result.get("critical", false)
+		var hp_dmg: int = result.get("hp_damage", 0)
+		# 震动强度：暴击 > 普通命中 > miss
+		var strength: float = 0.0
+		if did_hit:
+			strength = clamp(0.4 + float(hp_dmg) / 50.0, 0.4, 1.0)
+			if is_crit:
+				strength = 1.0
+		target.play_hit_reaction(strength, did_hit)
+		# 暴击 → 屏幕震动
+		if is_crit and did_hit:
+			_shake_camera(0.25, 4.0)
+		elif did_hit and hp_dmg >= 30:
+			# 重击（>=30 HP 伤害）也轻微震
+			_shake_camera(0.12, 2.0)
 
 
 func _on_any_unit_died(unit: Unit) -> void:

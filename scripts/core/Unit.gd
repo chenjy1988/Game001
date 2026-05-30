@@ -182,6 +182,47 @@ func set_active_turn(active: bool) -> void:
 	queue_redraw()
 
 
+# ──────────── 攻击/受击反馈动画 ────────────
+## 受击：左右抖动 + modulate 闪红/闪灰
+##   hit_strength: 0~1，强度（暴击时传 1.0，轻击 0.4）
+##   was_hit: true=染红, false=染浅灰（表示未命中/被格挡）
+func play_hit_reaction(hit_strength: float = 0.6, was_hit: bool = true) -> void:
+	if not is_alive():
+		return
+	# 受击染色：modulate 闪一下再回归
+	var flash_color: Color
+	if was_hit:
+		flash_color = Color(1.6, 0.6, 0.6)  # 偏红
+	else:
+		flash_color = Color(1.4, 1.4, 1.4)  # 灰白（miss）
+	var color_tween := create_tween()
+	color_tween.tween_property(self, "modulate", flash_color, 0.05)
+	color_tween.tween_property(self, "modulate", Color(1, 1, 1), 0.18)
+
+	# 抖动：在 hex 中心附近 offset，结束后回归
+	var base_pos: Vector2 = HexCoord.axial_to_pixel(axial_pos, HexGrid.HEX_SIZE)
+	var shake_amp: float = lerp(2.0, 6.0, clamp(hit_strength, 0.0, 1.0))
+	var shake_tween := create_tween()
+	# 4 段抖动：左 → 右 → 左 → 回
+	shake_tween.tween_property(self, "position", base_pos + Vector2(-shake_amp, 0), 0.04)
+	shake_tween.tween_property(self, "position", base_pos + Vector2( shake_amp, 0), 0.05)
+	shake_tween.tween_property(self, "position", base_pos + Vector2(-shake_amp * 0.5, 0), 0.05)
+	shake_tween.tween_property(self, "position", base_pos, 0.06)
+
+
+## 攻击者出击动画：朝目标方向冲出 ~30% 距离再回来
+func play_attack_lunge(target_axial: Vector2i) -> void:
+	if not is_alive():
+		return
+	var base_pos: Vector2 = HexCoord.axial_to_pixel(axial_pos, HexGrid.HEX_SIZE)
+	var target_pos: Vector2 = HexCoord.axial_to_pixel(target_axial, HexGrid.HEX_SIZE)
+	var dir: Vector2 = (target_pos - base_pos).normalized()
+	var lunge_pos: Vector2 = base_pos + dir * (HexGrid.HEX_SIZE * 0.35)
+	var tween := create_tween()
+	tween.tween_property(self, "position", lunge_pos, 0.08).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(self, "position", base_pos, 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+
+
 func _process(_delta: float) -> void:
 	# 当前回合单位有箭头呼吸动画，需要持续重绘
 	if is_active_turn and is_alive():
