@@ -18,6 +18,7 @@ extends Node2D
 @onready var top_bar = $UI/TopBar
 @onready var tooltip = $UI/UnitTooltip
 @onready var battle_result_label: Label = $UI/BattleResultLabel
+@onready var flash_overlay: ColorRect = $UI/FlashOverlay
 
 # 玩家输入状态
 enum InputState { IDLE, UNIT_SELECTED }
@@ -221,6 +222,19 @@ var _shake_magnitude: float = 0.0
 var _camera_base_offset: Vector2 = Vector2.ZERO
 
 
+
+
+
+# ──────────── 整屏闪色反馈（暴击/重击） ────────────
+func _flash_screen(flash_color: Color, duration: float) -> void:
+	if flash_overlay == null:
+		return
+	flash_overlay.color = flash_color
+	flash_overlay.visible = true
+	var tw := create_tween()
+	tw.tween_property(flash_overlay, "color", Color(flash_color.r, flash_color.g, flash_color.b, 0.0), duration)
+	tw.tween_callback(func(): flash_overlay.visible = false)
+
 func _shake_camera(duration: float, magnitude: float) -> void:
 	if camera == null:
 		return
@@ -253,26 +267,27 @@ func _process(delta: float) -> void:
 # ──────────── 攻击日志 / 死亡通知（正规与借机攻击统一处理） ────────────
 func _on_any_unit_attacked(attacker: Unit, target: Unit, result: Dictionary) -> void:
 	unit_panel.append_log(DamageSystem.format_attack_log(result))
-	# 视觉反馈
+	var did_hit: bool = result.get("hit", false)
+	var is_crit: bool = result.get("critical", false)
+	var hp_dmg: int = result.get("hp_damage", 0)
+	# 攻击者前冲
 	if attacker and attacker.is_alive():
 		attacker.play_attack_lunge(target.axial_pos)
+	# 目标受击
 	if target and target.is_alive():
-		var did_hit: bool = result.get("hit", false)
-		var is_crit: bool = result.get("critical", false)
-		var hp_dmg: int = result.get("hp_damage", 0)
-		# 震动强度：暴击 > 普通命中 > miss
 		var strength: float = 0.0
 		if did_hit:
 			strength = clamp(0.4 + float(hp_dmg) / 50.0, 0.4, 1.0)
 			if is_crit:
 				strength = 1.0
 		target.play_hit_reaction(strength, did_hit)
-		# 暴击 → 屏幕震动
-		if is_crit and did_hit:
-			_shake_camera(0.25, 4.0)
-		elif did_hit and hp_dmg >= 30:
-			# 重击（>=30 HP 伤害）也轻微震
-			_shake_camera(0.12, 2.0)
+	# 屏幕震动 + 整屏闪红（暴击 / 重击）
+	if is_crit and did_hit:
+		_shake_camera(0.25, 5.0)
+		_flash_screen(Color(1.0, 0.2, 0.2, 0.35), 0.18)  # 暴击：明显红
+	elif did_hit and hp_dmg >= 30:
+		_shake_camera(0.12, 2.5)
+		_flash_screen(Color(1.0, 0.4, 0.4, 0.18), 0.10)  # 重击：浅红
 
 
 func _on_any_unit_died(unit: Unit) -> void:
@@ -303,7 +318,12 @@ func _run_ai_turn(unit: Unit) -> void:
 	while safety > 0 and unit.is_alive():
 		safety -= 1
 		var plan: Dictionary = BattleAI.decide(unit, _all_units, hex_grid)
-		var path: Array[Vector2i] = plan.get("path", [] as Array[Vector2i])
+		var path_raw: Variant = plan.get("path", null)
+		var path: Array[Vector2i] = []
+		if path_raw != null and path_raw is Array:
+			for p in path_raw:
+				if p is Vector2i:
+					path.append(p)
 		var target: Unit = plan.get("target", null)
 
 		# 1) 先执行移动（若有）
