@@ -65,9 +65,80 @@ static func neighbors(axial: Vector2i) -> Array[Vector2i]:
 	return result
 
 
+
+## 取距离为 N 的所有格子（六边形环）
+static func ring(axial: Vector2i, distance: int) -> Array[Vector2i]:
+	if distance == 0:
+		return [axial]
+	if distance < 0:
+		return []
+	
+	if distance == 1:
+		return neighbors(axial)
+	
+	var result: Array[Vector2i] = []
+	
+	# 从起始位置（西南方向 distance 步）开始绕环
+	var cube: Vector3i = Vector3i(axial.x, -axial.x - axial.y, axial.y)
+	var start: Vector3i = cube + Vector3i(0, distance, -distance)
+	var current: Vector3i = start
+	
+	# 沿六个方向绕环，每个方向走 distance 步
+	var directions: Array[Vector3i] = [
+		Vector3i(+1, -1,  0),  # SE → NE
+		Vector3i(+1,  0, -1),  # NE → E
+		Vector3i( 0, +1, -1),  # E → SE
+		Vector3i(-1, +1,  0),  # SE → SW
+		Vector3i(-1,  0, +1),  # SW → W
+		Vector3i( 0, -1, +1),  # W → NW
+	]
+	
+	for dir_idx in range(6):
+		var direction: Vector3i = directions[dir_idx]
+		for step in range(distance):
+			result.append(Vector2i(current.x, current.z))
+			current += direction
+	
+	return result
+
+
 ## 单方向邻居
 static func neighbor(axial: Vector2i, direction: int) -> Vector2i:
 	return axial + DIRECTIONS[direction % 6]
+
+
+## 取从 from -> to 方向的索引（仅当二者相邻时有意义；不相邻返回 -1）
+## 用于夹击 / 推开 / 击退等"方向相关"机制。
+static func direction_index(from: Vector2i, to: Vector2i) -> int:
+	var d: Vector2i = to - from
+	for i in range(6):
+		if DIRECTIONS[i] == d:
+			return i
+	return -1
+
+
+## 取 axial 在某方向"对面"的那个格子。
+## 例如 from=A、to=B（A 攻击 B），则返回 B 的另一侧（夹击友军该站的格）。
+static func opposite_across(from_axial: Vector2i, target_axial: Vector2i) -> Vector2i:
+	var d_idx: int = direction_index(from_axial, target_axial)
+	if d_idx < 0:
+		# 远程攻击或非相邻 → 用方向向量近似（target 远离 from 的那一格）
+		var dq: int = target_axial.x - from_axial.x
+		var dr: int = target_axial.y - from_axial.y
+		# 归一为 6 方向中最接近的
+		var best: int = 0
+		var best_dot: float = -INF
+		var v := Vector2(float(dq), float(dr))
+		if v.length() > 0.0:
+			v = v.normalized()
+		for i in range(6):
+			var dv := Vector2(float(DIRECTIONS[i].x), float(DIRECTIONS[i].y)).normalized()
+			var d_dot: float = dv.dot(v)
+			if d_dot > best_dot:
+				best_dot = d_dot
+				best = i
+		return target_axial + DIRECTIONS[best]
+	return target_axial + DIRECTIONS[d_idx]
 
 
 ## 六边形顶点（pointy-top，6 个角点）
