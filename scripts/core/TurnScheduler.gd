@@ -259,7 +259,7 @@ static func _test_timeline_generation() -> bool:
 	unit_b.stats.fatigue = 0
 	unit_b.stats.max_stamina = 100
 
-	var timeline: Array[TimelineEntry] = generate_timeline_preview([unit_a, unit_b], 0, 2)
+	var timeline: Array = generate_timeline_preview([unit_a, unit_b], 0, 2)
 
 	# 预期：2 轮 × 2 单位 = 4 条记录
 	if timeline.size() != 4:
@@ -297,7 +297,7 @@ static func _test_preempt_preview() -> bool:
 	unit_b.stats.max_stamina = 100
 
 	# 获取虚拟预览（B +40 Initiative）
-	var preview_timeline: Array[TimelineEntry] = preview_with_preempt_bonus([unit_a, unit_b], unit_b, 40, 1)
+	var preview_timeline: Array = preview_with_preempt_bonus([unit_a, unit_b], unit_b, 40, 1)
 
 	# 预期：预览中 unit_b 应该排在 unit_a 前面
 	if preview_timeline.size() < 2:

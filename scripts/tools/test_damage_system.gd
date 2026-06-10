@@ -164,13 +164,12 @@ func _t4_stamina_tier() -> void:
 
 
 ## 模拟"陌刀手 + 陌刀（Slash）打重甲"期望 base 在文档 § 6.4 范围
-##   文档：陌刀手（精通）满气力 普攻 → base = 75 × 1.0 × 1.2 = 90（去微波）
-##   含微波 jitter ±5% → 期望 [85.5, 94.5]
-##   命中身体（85%概率）/ 头部（15%概率）；mult = 1.0 / 1.5；本测取均值即可
+##   期望 base = weapon.damage_base × 1.0（满气力）× 1.2（精通）× jitter ±5%
+##   当前 data/weapons.json 陌刀 damage_base=85 → 名义 102，区间 [96.9, 107.1]
 func _t5_modao_vs_heavy_armor() -> void:
 	print("[T5] 陌刀手 vs 重甲：均值符合 § 6.4")
 	var atk := TestUnit.new("Modao", 80, 30, 0, 60, 0, 0, "modao", "", 30, 0)
-	# 重甲：head 140 / body 200（文档示例）
+	# 重甲：head 140 / body 200（文档示例）；横刀提供 block，格挡计入命中统计
 	var dst := TestUnit.new("Heavy", 50, 30, 0, 130, 140, 200, "saber", "", 30, 1)
 	get_root().add_child(atk)
 	get_root().add_child(dst)
@@ -181,6 +180,14 @@ func _t5_modao_vs_heavy_armor() -> void:
 		dst.queue_free()
 		return
 
+	var mastery_dmg: float = 1.2
+	var nominal: float = float(atk.weapon.damage_base) * mastery_dmg
+	var low: float = nominal * 0.95
+	var high: float = nominal * 1.05
+	var hit_chance: float = DamageSystem.calculate_hit_chance(atk, dst, {"mode": "slash"})
+	var block_chance: float = float(dst.weapon.block_value) / 100.0 if dst.weapon else 0.0
+	var pass_rate: float = hit_chance * (1.0 - block_chance)
+
 	# 跑 200 次，统计命中后 base_damage 均值（精通 1.2 系数 + 满气力）
 	var samples: Array[int] = []
 	var hits: int = 0
@@ -188,7 +195,7 @@ func _t5_modao_vs_heavy_armor() -> void:
 		dst.stats.head_armor = 140
 		dst.stats.body_armor = 200
 		var r: Dictionary = DamageSystem.execute_attack(atk, dst, {
-			"mastery_dmg": 1.2,
+			"mastery_dmg": mastery_dmg,
 			"mode": "slash",
 		})
 		if r.get("hit", false) and not r.get("blocked", false):
@@ -198,11 +205,12 @@ func _t5_modao_vs_heavy_armor() -> void:
 	for v in samples:
 		avg += float(v)
 	avg = avg / max(1, samples.size())
-	# 期望 base ≈ 90 × jitter（[85.5, 94.5]），命中身体多数情况
-	_expect(avg >= 85.0 and avg <= 95.0,
-		"base 均值 ≈ 90 (±5pct)，实际 %.2f（样本 %d）" % [avg, samples.size()])
-	# 至少 50% 命中（防御 30 vs 攻击 80 → 50%命中预期）
-	_expect(hits >= 80, "200 次至少 80 命中，实际 %d" % hits)
+	_expect(avg >= low and avg <= high,
+		"base 均值 ≈ %.1f (±5%% jitter)，实际 %.2f（样本 %d）" % [nominal, avg, samples.size()])
+	# 命中且未被格挡：200 × hit_chance × (1 - block)，允许 ±30% 随机波动
+	var min_hits: int = int(200.0 * pass_rate * 0.7)
+	_expect(hits >= min_hits, "200 次至少 %d 命中，实际 %d（hit=%.0f%%, block=%.0f%%）" % [
+		min_hits, hits, hit_chance * 100.0, block_chance * 100.0])
 
 	# 单次精确演示：固定 mastery_dmg = 1.2 + 强制头部 + force "命中" 不容易（randf 内部）；
 	# 转而验证 weight_modifier 在 result 中正确：

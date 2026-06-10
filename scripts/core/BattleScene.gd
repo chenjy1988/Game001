@@ -50,6 +50,7 @@ const LOG_PANEL_MARGIN: float = 8.0
 const LOG_PANEL_COLLAPSED_H: float = 102.0
 const LOG_PANEL_EXPANDED_H: float = 234.0
 var _log_collapsed_entries: Array[String] = []
+var _log_scroll_following: bool = true         ## 用户手动上滑后为 false，回到底部后恢复
 
 var _pause_menu_visible: bool = false
 var _pause_overlay: ColorRect = null
@@ -178,6 +179,10 @@ func _setup_battle_log_panel() -> void:
 		rt.fit_content = true
 		rt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		rt.custom_minimum_size = Vector2(248, 0)
+		rt.scroll_following = false
+		rt.focus_mode = Control.FOCUS_NONE
+		rt.context_menu_enabled = false
+		rt.mouse_filter = Control.MOUSE_FILTER_PASS
 
 		var log_area := Control.new()
 		log_area.name = "LogArea"
@@ -194,27 +199,12 @@ func _setup_battle_log_panel() -> void:
 		scroll.mouse_filter = Control.MOUSE_FILTER_STOP
 		log_area.add_child(scroll)
 		_log_scroll = scroll
-
-		var vbar: VScrollBar = scroll.get_v_scroll_bar()
-		vbar.custom_minimum_size.x = 14.0
-		vbar.add_theme_constant_override("min_grabber_length", 40)
-		var grabber := StyleBoxFlat.new()
-		grabber.bg_color = Color(0.55, 0.48, 0.38, 0.95)
-		grabber.corner_radius_top_left = 3
-		grabber.corner_radius_top_right = 3
-		grabber.corner_radius_bottom_left = 3
-		grabber.corner_radius_bottom_right = 3
-		vbar.add_theme_stylebox_override("grabber", grabber)
-		vbar.add_theme_stylebox_override("grabber_highlight", grabber)
-		var track := StyleBoxFlat.new()
-		track.bg_color = Color(0.12, 0.10, 0.08, 0.85)
-		track.content_margin_left = 2
-		track.content_margin_right = 2
-		vbar.add_theme_stylebox_override("scroll", track)
-		vbar.add_theme_stylebox_override("scroll_focus", track)
-
 		scroll.add_child(rt)
 		_log_richtext = rt
+
+		var vscroll: VScrollBar = _log_scroll.get_v_scroll_bar()
+		_style_battle_log_scrollbar(vscroll)
+		vscroll.value_changed.connect(_on_log_scroll_value_changed)
 
 
 
@@ -224,6 +214,62 @@ func _setup_battle_log_panel() -> void:
 		old_log_panel.visible = false
 
 	_battle_log_panel = box
+	_configure_battle_log_mouse_filters()
+
+
+func _style_battle_log_scrollbar(sb: ScrollBar) -> void:
+	sb.custom_minimum_size.x = 14
+	sb.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	var track := StyleBoxFlat.new()
+	track.bg_color = Color(0.12, 0.10, 0.08, 0.9)
+	track.content_margin_left = 2
+	track.content_margin_right = 2
+	track.content_margin_top = 2
+	track.content_margin_bottom = 2
+	sb.add_theme_stylebox_override("scroll", track)
+	sb.add_theme_stylebox_override("scroll_focus", track)
+
+	var grabber := StyleBoxFlat.new()
+	grabber.bg_color = Color(0.58, 0.50, 0.38, 0.95)
+	grabber.corner_radius_top_left = 4
+	grabber.corner_radius_top_right = 4
+	grabber.corner_radius_bottom_left = 4
+	grabber.corner_radius_bottom_right = 4
+	sb.add_theme_stylebox_override("grabber", grabber)
+
+	var grabber_hi := grabber.duplicate() as StyleBoxFlat
+	grabber_hi.bg_color = Color(0.72, 0.63, 0.48, 1.0)
+	sb.add_theme_stylebox_override("grabber_highlight", grabber_hi)
+
+
+func _configure_battle_log_mouse_filters() -> void:
+	if _battle_log_panel == null:
+		return
+	var toggle_btn := _battle_log_panel.find_child("LogToggleBtn", true, false)
+	if toggle_btn is Control:
+		(toggle_btn as Control).mouse_filter = Control.MOUSE_FILTER_STOP
+	if _log_scroll:
+		_log_scroll.mouse_filter = Control.MOUSE_FILTER_STOP
+	if _log_richtext:
+		_log_richtext.mouse_filter = Control.MOUSE_FILTER_STOP
+	var log_area := _battle_log_panel.find_child("LogArea", true, false)
+	if log_area is Control:
+		(log_area as Control).mouse_filter = Control.MOUSE_FILTER_PASS
+
+
+func _on_log_scroll_value_changed(value: float) -> void:
+	if _log_scroll == null:
+		return
+	var sb: VScrollBar = _log_scroll.get_v_scroll_bar()
+	_log_scroll_following = value >= sb.max_value - 2.0
+
+
+func _scroll_log_to_bottom() -> void:
+	if _log_scroll == null or not _log_scroll_following:
+		return
+	var sb: VScrollBar = _log_scroll.get_v_scroll_bar()
+	sb.value = sb.max_value
 
 
 ## 切换战斗日志展开/折叠（仅响应用户点击）
@@ -249,6 +295,7 @@ func _apply_log_expanded_state() -> void:
 		if _log_last_entry_lbl: _log_last_entry_lbl.visible = true
 		_battle_log_panel.offset_bottom = LOG_PANEL_TOP + LOG_PANEL_COLLAPSED_H
 		if btn: btn.text = "展开 ▼"
+	_configure_battle_log_mouse_filters()
 
 
 
@@ -365,7 +412,6 @@ func _on_combat_menu_action(action_id: String) -> void:
 				unit.stats.unit_name, unit.stats.ap,
 				turn_manager.can_wait() if turn_manager.has_method("can_wait") else "N/A",
 				str(is_second_wait)])
-		# 先输出日志，再执行等待（wait_current 会立即切换到下一个单位）
 		var wait_ok: bool = turn_manager.wait_current()
 		print("[BattleScene] wait_current 返回：%s" % str(wait_ok))
 		return
@@ -501,9 +547,9 @@ func _make_ui_passthrough() -> void:
 	# 底部行动条同理
 	if _bottom_bar_panel:
 		_recursively_set_mouse_passthrough(_bottom_bar_panel)
-	# 左上角日志容器同理
+	# 左上角日志面板保留滚轮/滚动按钮交互，不做穿透
 	if _battle_log_panel:
-		_recursively_set_mouse_passthrough(_battle_log_panel)
+		_configure_battle_log_mouse_filters()
 	# SidePanel 默认就是 IGNORE（在 SidePanel.gd _ready 里设过）
 	# UnitTooltip 已是 IGNORE（在 UnitTooltip.gd _ready）
 	# Background 已是 mouse_filter=2 (IGNORE) 在 .tscn 里设了

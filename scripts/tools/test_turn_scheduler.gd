@@ -157,7 +157,7 @@ func _t3_wait_to_tail() -> void:
 
 
 func _t4_wait_once_only() -> void:
-	print("[T4] 等待每回合每单位限 1 次")
+	print("[T4] 等待：首次排到队尾，二次视为结束回合")
 	var ua := TestUnit.new("A", 130, 0)
 	var ub := TestUnit.new("B", 100, 1)   ## 必须有敌方单位，否则 _check_battle_end 提前判负
 	var units := [ua, ub]
@@ -168,7 +168,8 @@ func _t4_wait_once_only() -> void:
 	# 当前 B，wait → queue=[A,B]，进 A
 	_expect(tm.wait_current(), "B 首次 wait 也应成功")
 	_expect(_name(tm.get_current_unit()) == "A", "两次 wait 后当前应是 A，实际 %s" % _name(tm.get_current_unit()))
-	_expect(not tm.wait_current(), "A 第二次 wait 应失败（限 1 次）")
+	_expect(tm.wait_current(), "A 第二次 wait 视为结束回合")
+	_expect(_name(tm.get_current_unit()) == "B", "A 结束回合后应是 B，实际 %s" % _name(tm.get_current_unit()))
 	_cleanup(tm, units)
 
 

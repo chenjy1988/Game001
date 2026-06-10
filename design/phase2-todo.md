@@ -154,10 +154,10 @@ Week B（Phase 2 收尾，试玩后再定）：
   * 删掉 `_ct: Dictionary` / `CT_THRESHOLD` / 仿真 tick 逻辑
   * 回合开始时一次性排出 `_turn_queue: Array[Unit]`，按队首推进
   * 回合定义回归"每个活着的单位行动 1 次"——快单位本回合不再多动一次
-- [x] **E2** — 实装"等待"机制：`wait_current()` 把当前单位挪到本回合 `_turn_queue` 末尾。
+- [x] **E2** — 实装"等待"机制：`wait_current()` 第一次把当前单位挪到本回合 `_turn_queue` 末尾；第二次（已等待过）视为 `end_turn()`。
   * 不消耗 AP（`is_resumed_from_wait` 跳过 start_turn 重置）
-  * 每回合每单位限 1 次（`_waited_this_round: Dictionary`）
-  * `can_wait()` 提供给 UI 判定；CombatMenu 绑定 `Q` 触发
+  * 每回合每单位仅可「延后顺序」1 次；第二次 Q = 结束回合
+  * `can_wait()` 提供给 UI 判定（已等待过仍 true，tooltip 切换）；CombatMenu 绑定 `Q` 触发
 - [x] **E3** — AP 不跨回合保留：每回合开始重置 `stats.ap = stats.max_ap`；end_turn 直接清零本回合剩余
 - [x] **E4** — `get_turn_order_preview()` 简化：返回 `本回合剩余队列 + 下回合预览队列`，TopBar 同步刷新
 - [x] **E5** — 兼容性扫描：`BattleAI.gd` / `Unit.gd` / `BattleScene.gd` 全部读队列状态而非 CT；`effective_initiative()` 保留作为排序依据
@@ -238,7 +238,7 @@ Week B（Phase 2 收尾，试玩后再定）：
   * 头像左侧：`Unit.get_portrait_texture()` 自动同步当前单位
   * 字母键固定槽（不变位）：`P` 详情切换 / `I` 道具（Phase 3 占位）/ `Q` 等待
   * 数字键 1~9 直绑：动态从 `weapon.attack_modes` 展开（"斩/刺/砸/射"）+ 占位技能 chip
-  * AP 不足时攻击 chip 自动灰化；TurnManager.can_wait() 控制等待 chip 灰化
+  * AP 不足时攻击 chip 自动灰化；`TurnManager.can_wait()` 控制 Q 可用（已等待过仍可用，文案切为结束回合）
   * Esc：详情打开时先关详情，否则不消费让 BattleScene 处理
 - [x] **F5** — DOS2 风 HUD 数值条（操作栏上方独立 panel，与 chip 长度解耦）：
   * 三层中心对称结构：`[头甲|身甲]` 细条 → `[HP|气力]` 粗条 → `AP 钻石点`
@@ -279,7 +279,7 @@ Week B（Phase 2 收尾，试玩后再定）：
 - [x] **战斗预览**：悬停敌人显示命中率 + 围攻（不含期望伤害）
 - [~] **TopBar**：Init 排序 + 职业缩写 + 气力档位
 - [ ] **Wisdom 暴击梯度**：斥候（Wis 50+）vs 枪手（Wis 20+）暴击差可观察
-- [x] **等待机制可用**：选中单位按 Q 后挪到本回合队尾，行动顺序更新；每回合限 1 次，二次按下置灰
+- [x] **等待机制可用**：Q 第一次排到本回合队尾；已等待过再按 Q 结束回合（剩余 AP 作废）；`can_wait()` 两种状态均可用
 - [x] **AP 不跨回合**：本回合剩余 AP > 0 时 end_turn，下回合开始 AP 重置 max_ap（不叠加）
 - [x] **战斗菜单数字键直触**：1~9 单键即可触发对应攻击/技能 chip，无需鼠标
 - [x] **战斗菜单字母键固定**：P=详情切换 / I=道具 / Q=等待，肌肉记忆位置不变

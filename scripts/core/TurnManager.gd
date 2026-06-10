@@ -7,9 +7,8 @@ class_name TurnManager
 ##   • 每回合开始时，按 effective_initiative 降序一次性排出本回合的 _turn_queue，
 ##     按队首推进。Init 仅决定回合内顺序，不决定频率——每个活着的单位每回合 1 次。
 ##
-##   • 等待（Wait）机制：单位轮到自己时可以调用 wait_current()，把自己挪到本回合
-##     未行动队列的末尾。每回合每单位限 1 次。等待不消耗 AP，再次轮到时不重置 AP/Fatigue
-##     （只在第一次轮到时 start_turn）。
+##   • 等待（Wait）机制：第一次 Q → 挪到本回合队尾（不消耗 AP，再次轮到不重置 AP）；
+##     第二次 Q（本回合已等待过）→ 视为结束回合，剩余 AP 作废。每回合每单位仅可「延后」1 次。
 ##
 ##   • AP 不跨回合保留：Unit.start_turn() 调用 stats.reset_ap()，轮到时 AP 重置为 max_ap。
 ##     end_turn 时本回合剩余 AP 自然丢弃（不持久化）。
@@ -129,22 +128,20 @@ func _advance_to_next() -> void:
 	turn_started.emit(u)
 
 
-## 让当前单位"等待"——第一次等待挪到队尾，第二次等待直接结束回合
-##   - 不消耗 AP / Fatigue
+## 让当前单位"等待"——第一次挪到队尾，第二次视为结束回合
+##   - 不消耗 AP / Fatigue（第一次等待）
 ##   - 第一次等待：挪到本回合队尾，再次轮到时不重置 AP/Fatigue
-##   - 第二次等待（已等过）：直接结束回合，丢弃剩余 AP
-##   - 返回 true = 等待/结束成功；false = 当前没人在行动 / 队列空
+##   - 第二次等待（已等过）：直接 end_turn，丢弃剩余 AP
+##   - 返回 true = 等待/结束成功；false = 无当前单位 / 队列空（首次等待时）
 func wait_current() -> bool:
 	if _current_unit == null or not _current_unit.is_alive():
 		print("[Wait] 失败：无当前单位或已死亡")
 		return false
 	var u: Unit = _current_unit
-	# 第二次等待：直接结束回合
 	if _waited_this_round.has(u):
 		print("[Wait] %s 已等待过，直接结束回合" % u.get_unit_name())
-		u.end_turn()  # 触发 action_completed → _on_unit_action_completed → _advance_to_next
+		u.end_turn()
 		return true
-	# 第一次等待：队列空则无意义
 	if _turn_queue.is_empty():
 		print("[Wait] 失败：%s 是最后一个行动的，等待无意义" % u.get_unit_name())
 		return false
@@ -157,16 +154,16 @@ func wait_current() -> bool:
 
 
 ## 查询当前单位是否可以等待（用于 UI 按钮状态）
-##   - 已等待过 → 可以（实际是结束回合）
-##   - 未等待过 + 队列空 → 不行（等了也没意义）
-##   - 未等待过 + 队列非空 → 可以
+##   - 已等待过 → 可以（第二次 Q = 结束回合）
+##   - 未等待过 + 队列空 → 不行
+##   - 未等待过 + 队列非空 → 可以（第一次 Q = 排到队尾）
 func can_wait() -> bool:
 	if _current_unit == null or not _current_unit.is_alive():
 		return false
 	if _waited_this_round.has(_current_unit):
-		return true  # 第二次等待 = 结束回合，始终可用
+		return true
 	if _turn_queue.is_empty():
-		return false  # 最后一个，第一次等待无意义
+		return false
 	return true
 
 
