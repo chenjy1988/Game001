@@ -16,7 +16,8 @@ class_name BattleAI
 ##
 
 const SCORE_KILL_BONUS: float = 50.0
-const SCORE_OA_PER_HIT: float = -35.0          ## 命中即停规则下，每个借机攻击 -35 分（避免一次失败的撤退耗光行动）
+const SCORE_OA_PER_HIT: float = -50.0          ## "命中即停 + AP 照扣（BB 原版）"规则下，每个借机命中 -50 分。
+                                               ## 既挨刀又损 AP 还卡在原地 → AI 必须更主动规避借机
 const SCORE_PER_MOVE_HEX: float = -0.4         ## 移动一格小惩罚
 const SCORE_END_IN_ENEMY_ZOC: float = -6.0     ## 落点处在另一个 ZoC 中 -6
 const SCORE_LOW_HP_FOCUS_WEIGHT: float = 0.5   ## 目标HP越低，伤害权重提升
@@ -38,7 +39,7 @@ static func decide(unit: Unit, all_units: Array, hex_grid: HexGrid) -> Dictionar
 
 	@warning_ignore("integer_division")
 	var max_steps: int = unit.stats.ap / Unit.AP_PER_HEX
-	var reachable: Array[Vector2i] = hex_grid.get_reachable(unit.axial_pos, max_steps)
+	var reachable: Array[Vector2i] = hex_grid.get_reachable(unit.axial_pos, max_steps, unit.get_faction())
 	# 把"原地"也作为候选（不动）
 	var candidates_pos: Array[Vector2i] = [unit.axial_pos]
 	candidates_pos.append_array(reachable)
@@ -49,7 +50,7 @@ static func decide(unit: Unit, all_units: Array, hex_grid: HexGrid) -> Dictionar
 		# 通往 pos 的路径（pos == 自己 axial 时为空数组，相当于不动）
 		var path: Array[Vector2i] = []
 		if pos != unit.axial_pos:
-			path = hex_grid.find_path(unit.axial_pos, pos, unit.axial_pos)
+			path = hex_grid.find_path(unit.axial_pos, pos, unit.axial_pos, unit.get_faction())
 			if path.is_empty():
 				continue  # 不可达
 		# AP 校验：移动 + 至少一次攻击 才有意义；不能攻击就只算"无攻击移动"分支
@@ -62,7 +63,7 @@ static func decide(unit: Unit, all_units: Array, hex_grid: HexGrid) -> Dictionar
 		var oa_count: int = 0
 		var oa_expected_dmg: float = 0.0
 		if not path.is_empty():
-			var oa_steps: Array = hex_grid.analyze_path_oa(unit.axial_pos, path, unit.get_faction())
+			var oa_steps: Array = hex_grid.analyze_path_oa(unit.axial_pos, path, unit.get_faction(), unit)
 			for s in oa_steps:
 				for ctrl in s["oa_attackers"]:
 					oa_count += 1

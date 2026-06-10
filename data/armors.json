@@ -6,17 +6,23 @@
       "head_armor": 0,
       "body_armor": 0,
       "weight": 0,
+      "material": "none",
+      "armor_class": "none",
+      "move_penalty": 0,
       "combat_style": "nimble",
       "_comment": "完全裸奔，初始化用"
     },
     {
       "id": "leather_armor",
-      "display_name": "皮甲套装",
+      "display_name": "皮甲",
       "head_armor": 30,
       "body_armor": 50,
       "weight": 8,
+      "material": "leather",
+      "armor_class": "light",
+      "move_penalty": 0,
       "combat_style": "nimble",
-      "_comment": "轻甲：重量轻，Initiative 影响小"
+      "_comment": "轻甲：Slash 克之 / Pierce 弱效（80% Body） / Crush 极弱（90% Body）/ Eff_Def ×1.0 / 不影响移动"
     },
     {
       "id": "mail_armor",
@@ -24,17 +30,23 @@
       "head_armor": 80,
       "body_armor": 130,
       "weight": 18,
+      "material": "mail",
+      "armor_class": "medium",
+      "move_penalty": 0,
       "combat_style": "balanced",
-      "_comment": "中甲：常见军装"
+      "_comment": "中甲：Pierce 克之（钻环 60% Body） / Slash 中（80%） / Crush 中（70%）/ Eff_Def ×0.7 / 无移动惩罚"
     },
     {
       "id": "plate_armor",
-      "display_name": "板甲",
+      "display_name": "札甲",
       "head_armor": 200,
       "body_armor": 280,
       "weight": 35,
+      "material": "plate",
+      "armor_class": "heavy",
+      "move_penalty": 0,
       "combat_style": "battle_forged",
-      "_comment": "重甲：高防但拖慢 Initiative，必须破甲才能伤其皮肉"
+      "_comment": "重甲：Crush 克之（震 50% HP） / Slash 极弱（5% HP） / Pierce 中（30%）/ Eff_Def ×0.4 / 无移动惩罚"
     }
   ]
 }

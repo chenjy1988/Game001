@@ -11,66 +11,67 @@
 [sub_resource type="ShaderMaterial" id="VignetteMat"]
 shader = ExtResource("7_vignette")
 shader_parameter/vignette_strength = 0.55
-shader_parameter/vignette_inner = 0.35
+shader_parameter/vignette_inner = 0.40
 shader_parameter/vignette_outer = 1.10
-shader_parameter/base_color = Color(0.118, 0.106, 0.137, 1)
+shader_parameter/base_color = Color(0.16, 0.14, 0.11, 1)
+shader_parameter/tint = Color(1, 1, 1, 1)
+shader_parameter/bg_mode = 0
+shader_parameter/edge_irregularity = 0.12
 
 [node name="BattleScene" type="Node2D"]
 script = ExtResource("1_battle")
 
-[node name="Background" type="ColorRect" parent="."]
+[node name="Background" type="ColorRect" parent="UI"]
 material = SubResource("VignetteMat")
-offset_right = 1280.0
-offset_bottom = 720.0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = 0.0
+offset_bottom = 0.0
 mouse_filter = 2
-color = Color(0.118, 0.106, 0.137, 1)
+color = Color(0.16, 0.14, 0.11, 1)
 
 [node name="HexGrid" type="Node2D" parent="."]
-position = Vector2(440, 380)
 script = ExtResource("2_hexgrid")
-map_radius = 6
+map_radius = 9
 
 [node name="UnitLayer" type="Node2D" parent="."]
-position = Vector2(440, 380)
+
+[node name="EffectLayer" type="Node2D" parent="."]
 
 [node name="TurnManager" type="Node" parent="."]
 script = ExtResource("3_turn")
 
 [node name="Camera2D" type="Camera2D" parent="."]
-position = Vector2(640, 360)
 
 [node name="UI" type="CanvasLayer" parent="."]
 
 [node name="TopBar" type="PanelContainer" parent="UI"]
 anchors_preset = 10
 anchor_right = 1.0
-offset_bottom = 44.0
+offset_bottom = 50.0
 script = ExtResource("5_top")
 
 [node name="HBox" type="HBoxContainer" parent="UI/TopBar"]
 layout_mode = 2
+theme_override_constants/separation = 8
 
 [node name="RoundLabel" type="Label" parent="UI/TopBar/HBox"]
 layout_mode = 2
 size_flags_horizontal = 0
-custom_minimum_size = Vector2(120, 0)
+custom_minimum_size = Vector2(80, 0)
 theme_override_font_sizes/font_size = 18
 text = "回合 0"
 
-[node name="CurrentLabel" type="Label" parent="UI/TopBar/HBox"]
+[node name="HeaderPortraitContainer" type="HBoxContainer" parent="UI/TopBar/HBox"]
 layout_mode = 2
 size_flags_horizontal = 0
-custom_minimum_size = Vector2(260, 0)
-theme_override_font_sizes/font_size = 18
-text = "等待战斗开始..."
 
-[node name="OrderLabel" type="Label" parent="UI/TopBar/HBox"]
+[node name="PageButton" type="Button" parent="UI/TopBar/HBox"]
 layout_mode = 2
-size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 13
-theme_override_colors/font_color = Color(0.65, 0.6, 0.45, 1)
-text = "Initiative: -"
-clip_text = true
+size_flags_horizontal = 0
+theme_override_font_sizes/font_size = 14
+text = "▶"
 
 [node name="SidePanel" type="PanelContainer" parent="UI"]
 anchors_preset = 11
@@ -247,9 +248,10 @@ custom_minimum_size = Vector2(0, 240)
 
 [node name="Hint" type="Label" parent="UI/SidePanel/VBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 9
 theme_override_colors/font_color = Color(0.55, 0.55, 0.55, 1)
-text = "左键：选中/移动/攻击   空格：结束回合   R：重开   ESC：取消"
+text = "左键：选中/移动/攻击  空格：结束回合  R：重开  ESC：取消
+滚轮：缩放  Cmd+0：复位  WASD/方向键：平移  中键拖拽：平移"
 autowrap_mode = 2
 
 [node name="BattleResultLabel" type="Label" parent="UI"]

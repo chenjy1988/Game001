@@ -35,9 +35,9 @@ var _all_units: Array[Unit] = []
 var _ai_acting: bool = false
 
 
-var _battle_log_panel: Panel = null             ## 独立左上角日志容器（Panel 不自动包裹子内容，尺寸由 offset 控制）
-var _log_richtext: RichTextLabel = null         ## 日志 RichTextLabel 引用（从 SidePanel 中 reparent 出来）
-var _log_hint_label: Label = null               ## 日志面板内独立 hint label（与 SidePanel 完全解耦）
+var _battle_log_panel: Panel = null
+var _log_richtext: RichTextLabel = null
+var _log_last_entry_lbl: Label = null    ## 收起时显示最新一条日志
 var _bottom_bar_panel: PanelContainer = null   ## 底部独立头像行动条容器
 var _combat_menu: Node = null                  ## 战斗 5 大类菜单（F1，CombatMenu 实例）
 var _pending_attack_mode: String = ""          ## 当前待选择的攻击模式（F3）
@@ -59,13 +59,18 @@ func _ready() -> void:
 	_make_ui_passthrough()
 	if top_bar and top_bar.has_method("bind_turn_manager"):
 		top_bar.bind_turn_manager(turn_manager)
+	if unit_panel and unit_panel.has_method("set_hint"):
+		unit_panel.turn_manager = turn_manager
 
 	_spawn_units()
 	turn_manager.register_units(_all_units)
 	for u in _all_units:
 		u.attacked.connect(_on_any_unit_attacked)
 		u.unit_died.connect(_on_any_unit_died)
+		u.moved.connect(_on_any_unit_moved)
 	turn_manager.start_battle()
+	# 初始化战争迷雾（基于友方单位初始位置）
+	_update_fog_of_war()
 
 
 # ──────────── UI：日志独立 + 鼠标穿透 ────────────
@@ -74,65 +79,46 @@ func _setup_battle_log_panel() -> void:
 		return
 	var ui_layer: CanvasLayer = $UI as CanvasLayer
 
-	# ──── 根因修复 ────
-	# 之前 reparent 整个 old_log_panel（PanelContainer），PanelContainer 会自动
-	# 扩展到子节点的 minimum_size，无论外层用什么容器都挡不住它撑大。
-	# 修复：只 reparent log_text（RichTextLabel），不 reparent PanelContainer。
-	# RichTextLabel 的尺寸由 custom_minimum_size + fit_content 控制，不会撑破外层。
-
+	# ── Panel 容器 ──
 	var box := Panel.new()
 	box.name = "BattleLog"
-	box.anchor_left = 0.0
-	box.anchor_top = 0.0
-	box.anchor_right = 0.0
-	box.anchor_bottom = 0.0
-	box.offset_left = 8.0
-	box.offset_top = 50.0
+	box.anchor_left = 0.0; box.anchor_top = 0.0
+	box.anchor_right = 0.0; box.anchor_bottom = 0.0
+	box.offset_left = 8.0; box.offset_top = 50.0
 	box.offset_right = 296.0
-	box.offset_bottom = 116.0    # 初始折叠：标题栏 + 2行文字
-	box.custom_minimum_size = Vector2(0, 0)
+	box.offset_bottom = 114.0   # 折叠：top(50)+标题行(30)+最新日志行(22)+padding(12)
 	box.clip_contents = true
-	box.mouse_filter = Control.MOUSE_FILTER_IGNORE  # Panel 本身不拦截鼠标；内部 Button 由 _recursively_set_mouse_passthrough 保留 STOP
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(0.06, 0.05, 0.04, 0.78)
 	sb.border_color = Color(0.40, 0.34, 0.25, 0.85)
-	sb.border_width_left = 1
-	sb.border_width_right = 1
-	sb.border_width_top = 1
-	sb.border_width_bottom = 1
-	sb.corner_radius_top_left = 4
-	sb.corner_radius_top_right = 4
-	sb.corner_radius_bottom_left = 4
-	sb.corner_radius_bottom_right = 4
-	sb.content_margin_left = 8
-	sb.content_margin_right = 8
-	sb.content_margin_top = 6
-	sb.content_margin_bottom = 6
+	sb.border_width_left = 1; sb.border_width_right = 1
+	sb.border_width_top = 1; sb.border_width_bottom = 1
+	sb.corner_radius_top_left = 4; sb.corner_radius_top_right = 4
+	sb.corner_radius_bottom_left = 4; sb.corner_radius_bottom_right = 4
+	sb.content_margin_left = 8; sb.content_margin_right = 8
+	sb.content_margin_top = 6; sb.content_margin_bottom = 6
 	box.add_theme_stylebox_override("panel", sb)
 	ui_layer.add_child(box)
 
-	# 内部 VBox：用绝对定位填充 Panel 内容区
+	# ── 内部 VBox ──
 	var inner := VBoxContainer.new()
-	inner.anchor_left = 0.0
-	inner.anchor_top = 0.0
-	inner.anchor_right = 1.0
-	inner.anchor_bottom = 1.0
-	inner.offset_left = 8.0
-	inner.offset_top = 6.0
-	inner.offset_right = -8.0
-	inner.offset_bottom = -6.0
+	inner.anchor_left = 0.0; inner.anchor_top = 0.0
+	inner.anchor_right = 1.0; inner.anchor_bottom = 1.0
+	inner.offset_left = 8.0; inner.offset_top = 6.0
+	inner.offset_right = -8.0; inner.offset_bottom = -6.0
 	inner.add_theme_constant_override("separation", 4)
 	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_child(inner)
 
-	# 战斗日志标题 + 展开收起按钮行
+	# ── 标题行 ──
 	var header_hbox := HBoxContainer.new()
 	header_hbox.mouse_filter = Control.MOUSE_FILTER_PASS
 	inner.add_child(header_hbox)
 
 	var title_lbl := Label.new()
 	title_lbl.text = "战斗日志"
-	title_lbl.add_theme_font_size_override("font_size", 10)
+	title_lbl.add_theme_font_size_override("font_size", 13)
 	title_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	header_hbox.add_child(title_lbl)
 
@@ -141,136 +127,88 @@ func _setup_battle_log_panel() -> void:
 	header_hbox.add_child(spacer)
 
 	var log_toggle_btn := Button.new()
+	log_toggle_btn.name = "LogToggleBtn"
 	log_toggle_btn.text = "展开 ▼"
-	log_toggle_btn.add_theme_font_size_override("font_size", 9)
+	log_toggle_btn.add_theme_font_size_override("font_size", 12)
 	log_toggle_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	log_toggle_btn.focus_mode = Control.FOCUS_NONE  # 禁止获得焦点，避免 Space/Enter 误触发
+	log_toggle_btn.focus_mode = Control.FOCUS_NONE
+	log_toggle_btn.pressed.connect(toggle_battle_log)
 	header_hbox.add_child(log_toggle_btn)
 
-	# ──── 日志 body（可折叠区域）────
-	var log_body := VBoxContainer.new()
-	log_body.name = "LogBody"
-	log_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	log_body.add_theme_constant_override("separation", 2)
-	log_body.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	log_body.visible = false   # 默认折叠
-	inner.add_child(log_body)
+	# ── 收起时显示最新一条日志 ──
+	var last_lbl := Label.new()
+	last_lbl.name = "LogLastEntry"
+	last_lbl.add_theme_font_size_override("font_size", 11)
+	last_lbl.add_theme_color_override("font_color", Color(0.75, 0.73, 0.60))
+	last_lbl.autowrap_mode = TextServer.AUTOWRAP_OFF
+	last_lbl.clip_text = true
+	last_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	last_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	last_lbl.visible = true   # 折叠时可见
+	inner.add_child(last_lbl)
+	_log_last_entry_lbl = last_lbl
 
-	# ──── 只 reparent RichTextLabel，不 reparent PanelContainer ────
+	# ── 日志区（单一区域，展开时显示）──
 	var rt: RichTextLabel = unit_panel.log_text
 	if rt and rt.get_parent():
 		rt.get_parent().remove_child(rt)
-		rt.add_theme_font_size_override("normal_font_size", 10)
-		rt.add_theme_font_size_override("bold_font_size", 10)
-		rt.add_theme_font_size_override("italics_font_size", 10)
-		rt.add_theme_font_size_override("bold_italics_font_size", 10)
-		rt.add_theme_font_size_override("mono_font_size", 10)
+		rt.add_theme_font_size_override("normal_font_size", 12)
+		rt.add_theme_font_size_override("bold_font_size", 12)
+		rt.add_theme_font_size_override("italics_font_size", 12)
+		rt.add_theme_font_size_override("bold_italics_font_size", 12)
+		rt.add_theme_font_size_override("mono_font_size", 12)
 		rt.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		rt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		rt.scroll_following = true
 		rt.fit_content = false
-		rt.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		# rt.mouse_filter 保持默认 STOP，让用户可以使用自带的 VScrollBar 滚轮/拖拽
+		# rt.visible 不要设 false，由父容器 log_hbox 控制可见性
 
-		# 日志文本 + 右侧滚动按钮列，放入 HBox
+		# 日志文本 + 右侧固定尺寸滚动按钮（1/5展开高度 = 42px 每个）
 		var log_hbox := HBoxContainer.new()
+		log_hbox.name = "LogArea"
 		log_hbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		log_hbox.add_theme_constant_override("separation", 2)
 		log_hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		log_body.add_child(log_hbox)
+		log_hbox.visible = false
+		inner.add_child(log_hbox)
 		log_hbox.add_child(rt)
 		_log_richtext = rt
 
-		# 右侧滚动按钮列
-		var scroll_col := VBoxContainer.new()
-		scroll_col.add_theme_constant_override("separation", 2)
-		scroll_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		log_hbox.add_child(scroll_col)
 
-		var btn_up := Button.new()
-		btn_up.text = "▲"
-		btn_up.add_theme_font_size_override("font_size", 9)
-		btn_up.custom_minimum_size = Vector2(22, 22)
-		btn_up.focus_mode = Control.FOCUS_NONE
-		btn_up.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-		btn_up.pressed.connect(func():
-			rt.scroll_following = false
-			var vscroll: VScrollBar = rt.get_v_scroll_bar()
-			if vscroll:
-				vscroll.value -= vscroll.page * 0.4
-		)
-		scroll_col.add_child(btn_up)
 
-		var spacer_scroll := Control.new()
-		spacer_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		spacer_scroll.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		scroll_col.add_child(spacer_scroll)
-
-		var btn_down := Button.new()
-		btn_down.text = "▼"
-		btn_down.add_theme_font_size_override("font_size", 9)
-		btn_down.custom_minimum_size = Vector2(22, 22)
-		btn_down.focus_mode = Control.FOCUS_NONE
-		btn_down.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-		btn_down.pressed.connect(func():
-			var vscroll: VScrollBar = rt.get_v_scroll_bar()
-			if vscroll:
-				var at_bottom: bool = is_equal_approx(vscroll.value, vscroll.max_value - vscroll.page)
-				if at_bottom:
-					rt.scroll_following = true  # 到底了恢复自动滚动
-				else:
-					rt.scroll_following = false
-					vscroll.value += vscroll.page * 0.4
-		)
-		scroll_col.add_child(btn_down)
-
-		# 命名按钮并绑定全局状态
-		log_toggle_btn.name = "LogToggleBtn"
-		log_toggle_btn.pressed.connect(toggle_battle_log)
-
-	# 隐藏 SidePanel 中残留的空 LogPanel（避免空壳占位）
+	# 隐藏原 SidePanel 中的残留 LogPanel
 	var old_log_panel: PanelContainer = unit_panel.log_panel
 	if old_log_panel:
 		old_log_panel.visible = false
 
-	# 独立 hint label，放入 body 一起折叠
-	var hint := Label.new()
-	hint.name = "LogHint"
-	hint.text = "左键：选中/移动/攻击  空格：结束回合  R：重开  ESC：取消\n滚轮：缩放  Cmd+0：复位  WASD/方向键：平移  中键拖拽：平移"
-	hint.add_theme_font_size_override("font_size", 8)
-	hint.add_theme_color_override("font_color", Color(0.55, 0.55, 0.55, 1))
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	log_body.add_child(hint)
-	_log_hint_label = hint
-
 	_battle_log_panel = box
 
 
-## 切换战斗日志展开/折叠（仅响应用户点击，与单位/回合完全无关）
+## 切换战斗日志展开/折叠（仅响应用户点击）
 func toggle_battle_log() -> void:
 	_log_expanded = not _log_expanded
 	_apply_log_expanded_state()
 
 
-## 根据 _log_expanded 切换 Panel 高度 + 内容可见性
-## 只从 toggle_battle_log 调用，不与任何单位/回合逻辑绑定
+## 根据 _log_expanded 切换高度 + 日志区可见性
 func _apply_log_expanded_state() -> void:
 	if _battle_log_panel == null:
 		return
-	var body: Node = _battle_log_panel.find_child("LogBody", true, false)
+	var log_area: Node = _battle_log_panel.find_child("LogArea", true, false)
 	var btn: Button = _battle_log_panel.find_child("LogToggleBtn", true, false) as Button
 	if _log_expanded:
-		if body:
-			body.visible = true
-		_battle_log_panel.offset_bottom = 260.0   # 展开高度：210px 内容区
-		if btn:
-			btn.text = "收起 ▲"
+		if log_area: log_area.visible = true
+		if _log_last_entry_lbl: _log_last_entry_lbl.visible = false
+		_battle_log_panel.offset_bottom = 260.0
+		if btn: btn.text = "收起 ▲"
 	else:
-		if body:
-			body.visible = false
-		_battle_log_panel.offset_bottom = 116.0   # 折叠高度：标题栏 + 2行文字
-		if btn:
-			btn.text = "展开 ▼"
+		if log_area: log_area.visible = false
+		if _log_last_entry_lbl: _log_last_entry_lbl.visible = true
+		_battle_log_panel.offset_bottom = 114.0   # 标题行 + 最新日志行
+		if btn: btn.text = "展开 ▼"
+
+
+
 
 
 ## 把 TopBar 里的头像条 (PortraitBox) 搬到屏幕底部，单独成 BottomBar
@@ -413,16 +351,33 @@ func _mode_chinese(mode: String) -> String:
 		_:        return mode
 
 
-## 简短提示：直接写到独立战斗日志（不经过 SidePanel）
+## 所有战斗日志都走这里：写 RichTextLabel + 同步更新折叠行
 func _log_hint(bbcode: String) -> void:
 	if _log_richtext:
 		_log_richtext.append_text(bbcode + "\n")
+	_update_log_last_entry(bbcode)
 
 
-## 更新日志面板 hint 文本（CombatMenu 等外部调用，不走 SidePanel）
+func _update_log_last_entry(bbcode: String) -> void:
+	if _log_last_entry_lbl == null:
+		return
+	# 去除 bbcode 标签，只保留纯文字
+	var plain: String = bbcode
+	plain = plain.replace("[/color]", "").replace("[b]", "").replace("[/b]", "")
+	plain = plain.replace("[i]", "").replace("[/i]", "")
+	while plain.find("[color=") >= 0:
+		var s: int = plain.find("[color=")
+		var e: int = plain.find("]", s)
+		if e >= 0:
+			plain = plain.left(s) + plain.substr(e + 1)
+		else:
+			break
+	_log_last_entry_lbl.text = plain
+
+
+## 更新日志面板 hint 文本（CombatMenu 等外部调用）
 func set_log_hint(text: String) -> void:
-	if _log_hint_label:
-		_log_hint_label.text = text
+	_log_hint(text)  # 直接写入日志
 
 
 ## 让所有 UI 容器不拦截鼠标，确保滚轮缩放、中键拖拽能传到 _unhandled_input
@@ -455,14 +410,37 @@ func _recursively_set_mouse_passthrough(node: Node) -> void:
 
 # ──────────── 单位生成 ────────────
 func _spawn_units() -> void:
-	# 友方 2 人
-	_create_unit("阿尔伯特", 0, Vector2i(-3, 1), "saber", "leather_armor", {"hp": 65, "melee": 60, "def": 18, "init": 200})
-	_create_unit("贡多巴德", 0, Vector2i(-2, 2), "war_hammer", "mail_armor", {"hp": 75, "melee": 55, "def": 12, "init": 90})
+	# 友方 4 人（职业驱动，固定中值属性）
+	_create_unit_from_job("王五",   0, Vector2i(-3,  1), "tiaodang",  "saber",  "mail_armor")
+	_create_unit_from_job("张三",   0, Vector2i(-2,  2), "qiangbing", "spear",  "mail_armor")
+	_create_unit_from_job("赵六",   0, Vector2i(-3,  0), "qibing",    "saber",  "leather_armor")
+	_create_unit_from_job("李四",   0, Vector2i(-4,  1), "chihou",    "dagger", "leather_armor")
 
-	# 敌方 3 人
-	_create_unit("强盗头目", 1, Vector2i(2, -1), "battle_axe", "mail_armor", {"hp": 80, "melee": 55, "def": 15, "init": 95})
-	_create_unit("强盗匕首手", 1, Vector2i(3, -2), "dagger", "leather_armor", {"hp": 50, "melee": 50, "def": 25, "init": 115})
-	_create_unit("强盗矛兵", 1, Vector2i(2, 0), "spear", "leather_armor", {"hp": 60, "melee": 50, "def": 15, "init": 100})
+	# 敌方 3 人（手写固定属性，兼容旧 demo）
+	_create_unit("强盗头目",   1, Vector2i(2, -1), "battle_axe",  "mail_armor",     {"hp": 80, "melee": 55, "def": 15, "init": 95})
+	_create_unit("强盗匕首手", 1, Vector2i(3, -2), "dagger",      "leather_armor",  {"hp": 50, "melee": 50, "def": 25, "init": 115})
+	_create_unit("强盗矛兵",   1, Vector2i(2,  0), "spear",       "leather_armor",  {"hp": 60, "melee": 50, "def": 15, "init": 100})
+
+
+## 按职业 id 生成单位（使用 fixed_stats 中值，不随机）
+func _create_unit_from_job(unit_name: String, faction: int, axial: Vector2i,
+		job_id: String, weapon_id: String, armor_id: String) -> Unit:
+	var job = JobDB.get_job(job_id)
+	if job == null:
+		push_error("[BattleScene] unknown job_id: %s, fallback to default stats" % job_id)
+		return _create_unit(unit_name, faction, axial, weapon_id, armor_id, {})
+	var p: Dictionary = job.fixed_stats()
+	var unit := _create_unit(unit_name, faction, axial, weapon_id, armor_id, {
+		"hp":      p["max_hp"],
+		"melee":   p["melee_skill"],
+		"def":     p["defense"],
+		"init":    p["base_initiative"],
+		"resolve": p["resolve"],
+		"wisdom":  p["wisdom"],
+		"move":    p["move_range"],
+	})
+	unit.job = job
+	return unit
 
 
 func _create_unit(unit_name: String, faction: int, axial: Vector2i, weapon_id: String, armor_id: String, params: Dictionary) -> Unit:
@@ -555,6 +533,7 @@ func _on_hex_clicked(axial: Vector2i) -> void:
 		var path: Array[Vector2i] = hex_grid.find_path(current.axial_pos, axial, current.axial_pos, current.get_faction())
 		@warning_ignore("integer_division")
 		var max_steps: int = current.stats.ap / Unit.AP_PER_HEX
+		print("[DEBUG] click empty axial=", axial, " path=", path, " path.size=", path.size(), " max_steps=", max_steps, " ap=", current.stats.ap)
 		if not path.is_empty() and path.size() <= max_steps:
 			_player_move(current, path)
 
@@ -768,8 +747,10 @@ func _process(delta: float) -> void:
 
 # ──────────── 攻击日志 / 死亡通知（正规与借机攻击统一处理） ────────────
 func _on_any_unit_attacked(attacker: Unit, target: Unit, result: Dictionary) -> void:
+	var bbcode: String = DamageSystem.format_attack_log(result)
 	if _log_richtext:
-		_log_richtext.append_text(DamageSystem.format_attack_log(result) + "\n")
+		_log_richtext.append_text(bbcode + "\n")
+	_update_log_last_entry(bbcode)
 	var did_hit: bool = result.get("hit", false)
 	var is_crit: bool = result.get("critical", false)
 	var hp_dmg: int = result.get("hp_damage", 0)
@@ -824,8 +805,10 @@ func _on_any_unit_attacked(attacker: Unit, target: Unit, result: Dictionary) -> 
 func _on_any_unit_died(unit: Unit) -> void:
 	hex_grid.set_occupant(unit.axial_pos, null)
 	unit.queue_redraw()
+	var bbcode: String = "[color=#A03030]✦ %s 倒下[/color]" % unit.get_unit_name()
 	if _log_richtext:
-		_log_richtext.append_text("[color=#A03030]✦ %s 倒下[/color]\n" % unit.get_unit_name())
+		_log_richtext.append_text(bbcode + "\n")
+	_update_log_last_entry(bbcode)
 	# 死亡特效：血溅 + 烟雾飘起
 	if effect_layer and unit:
 		HitEffectScript.spawn(effect_layer, unit.position, "blood", 1.3)
@@ -844,6 +827,30 @@ func _clear_selection() -> void:
 	_selected_unit = null
 	_input_state = InputState.IDLE
 	hex_grid.clear_highlights()
+
+
+# ──────────── 战争迷雾 ────────────
+func _update_fog_of_war() -> void:
+	var friendly: Array = []
+	for u in _all_units:
+		if u != null and u.is_alive() and u.get_faction() == 0:
+			friendly.append(u)
+	hex_grid.update_fog_of_war(friendly)
+	_update_unit_visibility()
+
+
+func _update_unit_visibility() -> void:
+	for u in _all_units:
+		if u == null or not u.is_alive():
+			continue
+		if u.get_faction() == 0:
+			u.visible = true
+		else:
+			u.visible = hex_grid.is_hex_visible(u.axial_pos)
+
+
+func _on_any_unit_moved(_unit: Unit, _from: Vector2i, _to: Vector2i) -> void:
+	_update_fog_of_war()
 
 
 # ──────────── AI（评分式决策） ────────────

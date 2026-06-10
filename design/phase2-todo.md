@@ -32,9 +32,9 @@
 
 ## B. 4 职业数据 + 武器专精（Week 2）
 
-- [ ] **B1** — `scripts/core/data/JobClass.gd`（Resource）+ `data/jobs.json`：4 职业属性面板（HP/Init/Melee/Defense/Resolve/Wisdom/AP/Move/武器专精表）—— 跳荡 / 陌刀手 / 不良人 / 押衙亲兵
-- [ ] **B2** — `JobDB.gd`（autoload）+ Unit.gd 接入 `job: JobClass` 字段，按职业 stats 范围 randomize 生成
-- [ ] **B3** — 武器专精系数应用到 DamageSystem：伤害 × 系数（不擅 0.9 / 合格 1.0 / 擅长 1.10 / 精通 1.20）/ AP × 系数 / 精通暴击 +5
+- [x] **B1** — `scripts/core/JobClass.gd`（Resource）+ `data/jobs.json`：4 职业（跳荡/枪手/奇兵/斥候）+ `JobDB.gd` autoload 注册完毕；与设计文档职业名不同，以当前 JSON 为准
+- [x] **B2** — `JobClass.fixed_stats()`（中值，调试用）+ `BattleScene._create_unit_from_job()` 接入 JobDB；友方 4 单位按职业生成，`unit.job` 已注入
+- [x] **B3** — 武器专精（方案 A）：`Unit.attack_target()` 填入 `mastery_dmg`：在武器池内 1.0，否则 0.9（手拙）；命中惩罚 -10% 已在 `calculate_hit_chance` 实装；`job == null` 的单位不受影响
 
 **Week 2 deliverable**：4 职业能正确生成 + 普攻数值因专精梯度而拉开差距。
 
@@ -234,7 +234,7 @@
 | 阶段 | 任务数 | 已完成 | 进行中 | 待办 |
 |---|---|---|---|---|
 | A. DamageSystem 重构 | 4 | 4 | 0 | 0 |
-| B. 4 职业数据 | 3 | 0 | 0 | 3 |
+| B. 4 职业数据 | 3 | 3 | 0 | 0 |
 | C. Ability 框架 | 1 | 0 | 0 | 1 |
 | D. UI + Demo | 5 | 0 | 0 | 5 |
 | E. 行动调度重构 | 6 | 6 | 0 | 0 |

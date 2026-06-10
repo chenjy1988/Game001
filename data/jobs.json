@@ -1,0 +1,62 @@
+[
+  {
+    "id": "tiaodang",
+    "name": "跳荡",
+    "description": "突击步兵 / 攻坚先锋。横刀+短矛+团牌，中甲，攻防均衡。",
+    "tier": 1,
+    "hp_range":      [80, 90],
+    "init_range":    [75, 90],
+    "melee_range":   [75, 85],
+    "defense_range": [35, 45],
+    "resolve_range": [40, 55],
+    "wisdom_range":  [25, 35],
+    "max_ap": 9,
+    "move_range": 4,
+    "weapon_pool": ["saber", "javelin", "bow"]
+  },
+  {
+    "id": "qiangbing",
+    "name": "枪手",
+    "description": "阵列防御 / 反骑兵。长枪+札甲，重甲耐久，Hold the line。",
+    "tier": 1,
+    "hp_range":      [85, 100],
+    "init_range":    [65, 80],
+    "melee_range":   [65, 80],
+    "defense_range": [40, 55],
+    "resolve_range": [45, 60],
+    "wisdom_range":  [20, 30],
+    "max_ap": 9,
+    "move_range": 4,
+    "weapon_pool": ["saber", "javelin", "spear", "bow", "crossbow"]
+  },
+  {
+    "id": "qibing",
+    "name": "奇兵",
+    "description": "机动近战 + 副弓骚扰。横刀+步弓，轻甲高速。",
+    "tier": 1,
+    "hp_range":      [65, 80],
+    "init_range":    [90, 110],
+    "melee_range":   [70, 85],
+    "defense_range": [30, 40],
+    "resolve_range": [35, 45],
+    "wisdom_range":  [35, 45],
+    "max_ap": 9,
+    "move_range": 4,
+    "weapon_pool": ["saber", "javelin", "spear", "bow"]
+  },
+  {
+    "id": "chihou",
+    "name": "斥候",
+    "description": "侦察 / 潜伏。短刀+步弓，轻甲高速，Wisdom 系核心。",
+    "tier": 1,
+    "hp_range":      [55, 70],
+    "init_range":    [100, 120],
+    "melee_range":   [60, 75],
+    "defense_range": [30, 40],
+    "resolve_range": [35, 50],
+    "wisdom_range":  [50, 60],
+    "max_ap": 9,
+    "move_range": 4,
+    "weapon_pool": ["dagger", "saber", "bow"]
+  }
+]

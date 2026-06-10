@@ -13,6 +13,11 @@ const _TILE_DIR: String = "res://assets/terrain/ai/"
 const _ATLAS_DIR: String = "res://assets/terrain/ai/atlas/"
 var _atlas_by_biome: Dictionary = {}
 var _hex_biome: Dictionary = {}
+var _obstacles: Dictionary = {}         ## axial → int(0-2)，障碍格 + 随机纹理索引
+var _obstacle_textures: Array = []      ## rocky_0/1/2.png
+var _transition_textures: Dictionary = {}  ## biome → { dir_index → Texture2D }
+var _hex_border_cache: Dictionary = {}  ## axial → PackedVector2Array，预计算地形顶点缓存
+var _terrain_layer: Node2D = null       ## 独立地形层：只在初始化时绘制一次
 const EDGE_SUBDIV: int = 6     # 每条边插 6 个中间点
 const CORNER_JITTER: float = 4.0
 const EDGE_JITTER: float = 10.0  # 三角扇方式下可以大幅扰动，不会自交
@@ -25,6 +30,24 @@ signal hex_hovered(axial: Vector2i)
 # 地图数据
 var _hexes: Dictionary = {}            ## Vector2i -> bool (是否可走)
 var _occupants: Dictionary = {}        ## Vector2i -> Unit (谁站在上面)
+var _elevation: Dictionary = {}        ## Vector2i -> int (0=平地 1=高地 -1=低地)
+
+# ─── 战争迷雾 ───
+var fog_enabled: bool = true           ## 是否启用战争迷雾
+var _visible_hexes: Dictionary = {}    ## axial -> true（当前帧可见）
+var _explored_hexes: Dictionary = {}   ## axial -> true（历史上曾可见）
+const DEFAULT_SIGHT_RANGE: int = 5     ## 默认视野半径（hex 格数）
+
+## 获取地形高度（未设置默认 0）
+func get_elevation(axial: Vector2i) -> int:
+	return _elevation.get(axial, 0)
+
+## 设置地形高度
+func set_elevation(axial: Vector2i, level: int) -> void:
+	if level == 0:
+		_elevation.erase(axial)
+	else:
+		_elevation[axial] = level
 
 # 高亮缓存（用于 _draw）
 var _highlight_move: Array[Vector2i] = []
@@ -47,10 +70,20 @@ func _ready() -> void:
 	_terrain_noise.frequency = 0.025
 	_terrain_noise.fractal_octaves = 2
 	_generate_map()
+	_generate_obstacles()   # 随机障碍（含连通性验证）
 	_build_astar()
 	_load_terrain_textures()
 	_assign_hex_tiles()
-	queue_redraw()
+
+	# 地形层：独立子节点，只绘制一次，之后不再重绘
+	_terrain_layer = Node2D.new()
+	_terrain_layer.texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
+	_terrain_layer.show_behind_parent = true  # 渲染在父节点 _draw()（高亮层）之后
+	add_child(_terrain_layer)
+	_terrain_layer.draw.connect(_draw_terrain)
+	_terrain_layer.queue_redraw()
+
+	queue_redraw()  # 高亮层首次绘制
 
 
 # ──────────── 地形加载 ────────────
@@ -61,6 +94,25 @@ func _load_terrain_textures() -> void:
 			var tex := load(path) as Texture2D
 			if tex != null:
 				_atlas_by_biome[b] = tex
+	# 障碍物纹理：rocky_0/1/2（随机选一个让每个障碍格看起来不同）
+	_obstacle_textures.clear()
+	for i in range(3):
+		var path := "%srocky_%d.png" % [_TILE_DIR, i]
+		if ResourceLoader.exists(path):
+			var tex := load(path) as Texture2D
+			if tex != null:
+				_obstacle_textures.append(tex)
+
+	# 过渡纹理：transition/<biome>_dir<n>.png（4种地形 × 6方向 = 24张）
+	var trans_dir: String = _TILE_DIR + "transition/"
+	for b in ["grass", "leaf", "rocky", "dirt"]:
+		_transition_textures[b] = {}
+		for d in range(6):
+			var path := "%s%s_dir%d.png" % [trans_dir, b, d]
+			if ResourceLoader.exists(path):
+				var tex := load(path) as Texture2D
+				if tex != null:
+					_transition_textures[b][d] = tex
 
 
 func _assign_hex_tiles() -> void:
@@ -101,6 +153,13 @@ func _assign_hex_tiles() -> void:
 					best_b = b
 			new_biome[axial] = best_b
 		_hex_biome = new_biome
+
+	# 预计算每个格子的地形顶点（避免 _draw 每帧重算噪声）
+	var tile_radius: float = HEX_SIZE + 3.5
+	_hex_border_cache.clear()
+	for axial in _hexes.keys():
+		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		_hex_border_cache[axial] = _wavy_hex_polygon(center, tile_radius)
 
 
 func _terrain_offset(p: Vector2) -> Vector2:
@@ -147,6 +206,80 @@ func _generate_map() -> void:
 		var r2: int = min(map_radius, -q + map_radius)
 		for r in range(r1, r2 + 1):
 			_hexes[Vector2i(q, r)] = true
+
+
+## 随机生成障碍格（不可走），含 BFS 连通性验证。
+## 保护区：中央核心 + 双方出生带 不放障碍。
+## 障碍密度目标约 12%，若连通性不足则逐步恢复障碍直到满足阈值。
+func _generate_obstacles() -> void:
+	var noise := FastNoiseLite.new()
+	noise.seed = randi()                        # 每局随机种子
+	noise.noise_type = FastNoiseLite.TYPE_PERLIN
+	noise.frequency = 0.35
+	noise.fractal_octaves = 2
+
+	# 出生保护带：左侧 q <= spawn_guard 为友方区，右侧 q >= -spawn_guard 为敌方区
+	var spawn_guard: int = -(map_radius - 2)    # 例：radius=6 → q<=-4 保护
+
+	var candidates: Array[Vector2i] = []
+	for axial in _hexes.keys():
+		# 中央核心保护（半径 2 内不放障碍）
+		if HexCoord.distance(axial, Vector2i.ZERO) <= 2:
+			continue
+		# 双方出生带保护
+		if axial.x <= spawn_guard or axial.x >= -spawn_guard:
+			continue
+		var v: float = noise.get_noise_2d(float(axial.x), float(axial.y))
+		if v > 0.38:       # ~12% 概率成为障碍
+			candidates.append(axial)
+
+	# 移除候选障碍
+	for axial in candidates:
+		_hexes.erase(axial)
+
+	# BFS 连通性验证：从中心出发，统计可达格数
+	# 若可达率 < 阈值，逐步恢复障碍直到满足要求
+	const CONNECTIVITY_THRESHOLD: float = 0.82
+	var total_before: int = _hexes.size() + candidates.size()
+	candidates.shuffle()   # 随机顺序恢复，避免系统性偏差
+	var restore_idx: int = 0
+	while true:
+		var reachable: int = _count_reachable(Vector2i.ZERO)
+		if float(reachable) / float(max(1, _hexes.size())) >= CONNECTIVITY_THRESHOLD:
+			break
+		if restore_idx >= candidates.size():
+			break   # 所有候选都恢复了，放弃强制验证
+		_hexes[candidates[restore_idx]] = true
+		restore_idx += 1
+
+	var obstacle_count: int = candidates.size() - restore_idx
+	# 记录最终障碍格（用于渲染）
+	_obstacles.clear()
+	for i in range(restore_idx, candidates.size()):
+		_obstacles[candidates[i]] = randi() % 3   # 随机纹理索引 0/1/2
+	print("[HexGrid] 地图生成完成：总格数=%d 障碍=%d(%.0f%%)" % [
+		_hexes.size(), obstacle_count,
+		float(obstacle_count) / float(total_before) * 100.0
+	])
+
+
+## BFS 统计从 origin 出发可达的格子数（仅用于连通性验证）
+func _count_reachable(origin: Vector2i) -> int:
+	if not _hexes.has(origin):
+		# origin 被移除，找最近的有效格
+		for axial in _hexes.keys():
+			origin = axial
+			break
+	var visited: Dictionary = {}
+	var queue: Array = [origin]
+	visited[origin] = true
+	while not queue.is_empty():
+		var cur: Vector2i = queue.pop_front()
+		for n in HexCoord.neighbors(cur):
+			if _hexes.has(n) and not visited.has(n):
+				visited[n] = true
+				queue.append(n)
+	return visited.size()
 
 
 func _build_astar() -> void:
@@ -235,7 +368,22 @@ func find_path(from_axial: Vector2i, to_axial: Vector2i, ignore_occupant_at: Vec
 				ally_restores.append([aid, axial])
 				_astar.set_point_disabled(aid, false)
 
+	# 临时禁用敌方占用格（保证 AStar 不会规划穿越敌军的路线）
+	var enemy_disables: Array = []
+	if self_faction >= 0:
+		for axial in _occupants.keys():
+			var u = _occupants[axial]
+			if u == null or not u.has_method("get_faction") or u.get_faction() == self_faction:
+				continue
+			if not u.has_method("is_alive") or not u.is_alive():
+				continue
+			var eid: int = HexCoord.axial_to_id(axial)
+			if _astar.has_point(eid) and not _astar.is_point_disabled(eid):
+				enemy_disables.append([eid, false])
+				_astar.set_point_disabled(eid, true)
+
 	var id_path: PackedInt64Array = _astar.get_id_path(from_id, to_id)
+	print("[DEBUG find_path] from=", from_axial, " to=", to_axial, " self_faction=", self_faction, " id_path.size=", id_path.size(), " from_disabled=", from_was_disabled, " ally_restores=", ally_restores.size(), " enemy_disables=", enemy_disables.size())
 
 	# 还原
 	_astar.set_point_disabled(from_id, from_was_disabled)
@@ -243,20 +391,35 @@ func find_path(from_axial: Vector2i, to_axial: Vector2i, ignore_occupant_at: Vec
 		_astar.set_point_disabled(ignore_id, ignore_was_disabled)
 	for pair in ally_restores:
 		_astar.set_point_disabled(pair[0], true)
+	for pair in enemy_disables:
+		_astar.set_point_disabled(pair[0], false)
 
 	if id_path.size() <= 1:
+		print("[DEBUG find_path] id_path too short, return []")
 		return []
 	# 转回 axial（去掉起点；终点若是友方格则返回空——不能停在友方格）
 	var result: Array[Vector2i] = []
 	for i in range(1, id_path.size()):
 		var p: Vector2 = _astar.get_point_position(id_path[i])
 		result.append(_pixel_to_axial_lookup(p))
-	# 终点不能是友方占用格
+	# 终点不能是友方占用格，也不能是敌方占用格
 	if result.size() > 0 and _occupants.has(result[-1]):
 		var end_occ = _occupants[result[-1]]
-		if end_occ != null and end_occ.has_method("get_faction") \
-				and self_faction >= 0 and end_occ.get_faction() == self_faction:
+		print("[DEBUG find_path] end occupied by ", end_occ)
+		if end_occ != null and end_occ.has_method("get_faction") and self_faction >= 0:
+			# 无论友方还是敌方，都不能停在有单位的格子
+			print("[DEBUG find_path] end occupied, return []")
 			return []
+	# 中间路径不能穿过敌方格子（保险检查）
+	for i in range(0, result.size() - 1):
+		if _occupants.has(result[i]):
+			var mid_occ = _occupants[result[i]]
+			if mid_occ != null and mid_occ.has_method("get_faction") \
+					and self_faction >= 0 and mid_occ.get_faction() != self_faction \
+					and mid_occ.has_method("is_alive") and mid_occ.is_alive():
+				print("[DEBUG find_path] crossing enemy at ", result[i], " return []")
+				return []  # 路径穿越敌方格，视为不可达
+	print("[DEBUG find_path] result=", result)
 	return result
 
 
@@ -298,6 +461,7 @@ func get_reachable(origin: Vector2i, max_steps: int, self_faction: int = -1) -> 
 			visited[n] = cur_step + 1
 			queue.append(n)
 			result.append(n)
+	print("[DEBUG get_reachable] origin=", origin, " max_steps=", max_steps, " self_faction=", self_faction, " result_count=", result.size(), " result=", result)
 	return result
 
 
@@ -459,7 +623,90 @@ func _input(event: InputEvent) -> void:
 			hex_clicked.emit(ax)
 
 
-# ──────────── 渲染 ────────────
+## 地形层绘制（只在初始化时调用一次，连接到 _terrain_layer.draw 信号）
+func _draw_terrain() -> void:
+	var atlas_uv_scale: float = 1.0 / 256.0
+	var tri_colors := PackedColorArray([Color.WHITE, Color.WHITE, Color.WHITE])
+	var color_base_top := Color(0.24, 0.21, 0.18)
+	var color_base_bot := Color(0.13, 0.11, 0.09)
+	var color_border   := Color(0.42, 0.36, 0.26, 0.75)
+	var color_inner_hi := Color(0.55, 0.47, 0.32, 0.18)
+
+	for axial in _hexes.keys():
+		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var biome: String = _hex_biome.get(axial, "grass")
+		var atlas: Texture2D = _atlas_by_biome.get(biome, null)
+		var border_pts: PackedVector2Array = _hex_border_cache.get(axial, PackedVector2Array())
+		var n: int = border_pts.size()
+		if atlas != null:
+			for i in range(n):
+				var v0: Vector2 = center
+				var v1: Vector2 = border_pts[i]
+				var v2: Vector2 = border_pts[(i + 1) % n]
+				_terrain_layer.draw_polygon(
+					PackedVector2Array([v0, v1, v2]),
+					tri_colors,
+					PackedVector2Array([v0 * atlas_uv_scale, v1 * atlas_uv_scale, v2 * atlas_uv_scale]),
+					atlas
+				)
+		else:
+			var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
+			_terrain_layer.draw_colored_polygon(pts, color_base_bot)
+			var pts_inner: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 3.5)
+			_terrain_layer.draw_colored_polygon(pts_inner, color_base_top)
+			var pts_closed := pts.duplicate()
+			pts_closed.append(pts[0])
+			_terrain_layer.draw_polyline(pts_closed, color_border, 1.6, true)
+
+	# ── 过渡纹理叠加：相邻 biome 不同时，在边界方向叠过渡贴图 ──
+	for axial in _hexes.keys():
+		var biome: String = _hex_biome.get(axial, "grass")
+		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		for d in range(6):
+			var nb_axial: Vector2i = HexCoord.neighbor(axial, d)
+			if not _hexes.has(nb_axial):
+				continue
+			var nb_biome: String = _hex_biome.get(nb_axial, "grass")
+			if nb_biome == biome:
+				continue
+			# 邻居 biome 不同 → 叠加邻居 biome 在方向 d 的过渡贴图
+			var tex_dict: Dictionary = _transition_textures.get(nb_biome, {})
+			var trans_tex: Texture2D = tex_dict.get(d, null)
+			if trans_tex == null:
+				continue
+			# 过渡贴图 144×144 设计用于半径72px的hex，我们HEX_SIZE=36需缩放0.5
+			var half: float = HEX_SIZE
+			var dst_rect := Rect2(center.x - half, center.y - half, half * 2.0, half * 2.0)
+			_terrain_layer.draw_texture_rect(trans_tex, dst_rect, false)
+
+	# ── 障碍格渲染：rocky 纹理 + 深色叠加 ──
+	var dark_overlay := Color(0.0, 0.0, 0.0, 0.55)
+	for axial in _obstacles.keys():
+		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var tex_idx: int = _obstacles[axial]
+		var obs_tex: Texture2D = null
+		if tex_idx < _obstacle_textures.size():
+			obs_tex = _obstacle_textures[tex_idx]
+		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE)
+		if obs_tex != null:
+			# 用矩形 UV 采样（障碍纹理通常是独立贴图，非无缝 atlas）
+			var ts: Vector2 = obs_tex.get_size()
+			var uvs := PackedVector2Array()
+			for pt in pts:
+				uvs.append(Vector2(
+					(pt.x - center.x + HEX_SIZE) / (HEX_SIZE * 2.0),
+					(pt.y - center.y + HEX_SIZE) / (HEX_SIZE * 2.0)
+				) * ts)
+			_terrain_layer.draw_polygon(pts, PackedColorArray([Color.WHITE, Color.WHITE,
+				Color.WHITE, Color.WHITE, Color.WHITE, Color.WHITE]), uvs, obs_tex)
+		else:
+			# 无纹理时回退：深灰多边形
+			_terrain_layer.draw_colored_polygon(pts, Color(0.25, 0.22, 0.20))
+		# 深色叠加强化不可通行感
+		_terrain_layer.draw_colored_polygon(pts, dark_overlay)
+
+
+# ──────────── 渲染（高亮层，每帧刷新） ────────────
 ## 60Hz 推动重绘，用于高亮呼吸/路径动画
 func _process(_delta: float) -> void:
 	if not _highlight_move.is_empty() or not _highlight_attack.is_empty() \
@@ -468,11 +715,7 @@ func _process(_delta: float) -> void:
 
 
 func _draw() -> void:
-	# 颜色定义
-	var color_base_top := Color(0.24, 0.21, 0.18)
-	var color_base_bot := Color(0.13, 0.11, 0.09)
-	var color_border   := Color(0.42, 0.36, 0.26, 0.75)
-	var color_inner_hi := Color(0.55, 0.47, 0.32, 0.18)
+	# 颜色定义（仅高亮层需要的颜色）
 	var color_hover    := Color(0.95, 0.80, 0.30, 0.22)
 	var color_move     := Color(0.29, 0.56, 0.85, 0.40)
 	var color_attack   := Color(0.85, 0.29, 0.29, 0.50)
@@ -485,43 +728,7 @@ func _draw() -> void:
 	var breath: float = 0.5 + 0.5 * sin(t_ms / 380.0)
 	var fast_breath: float = 0.5 + 0.5 * sin(t_ms / 220.0)
 
-	# ---- 1) 地形纹理（有纹理时用纹理，否则回退到着色多边形） ----
-	var tile_radius: float = HEX_SIZE + 3.5
-	var atlas_uv_scale: float = 1.0 / 256.0
-	var tri_colors := PackedColorArray([Color.WHITE, Color.WHITE, Color.WHITE])
-
-	for axial in _hexes.keys():
-		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
-		var biome: String = _hex_biome.get(axial, "grass")
-		var atlas: Texture2D = _atlas_by_biome.get(biome, null)
-		var border_pts: PackedVector2Array = _wavy_hex_polygon(center, tile_radius)
-		var n: int = border_pts.size()
-		if atlas != null:
-			# 三角扇绘制：center → edge[i] → edge[i+1]
-			# 每个三角形单独调用，保证不会自交
-			for i in range(n):
-				var v0: Vector2 = center
-				var v1: Vector2 = border_pts[i]
-				var v2: Vector2 = border_pts[(i + 1) % n]
-				var pts := PackedVector2Array([v0, v1, v2])
-				var uvs := PackedVector2Array([
-					v0 * atlas_uv_scale,
-					v1 * atlas_uv_scale,
-					v2 * atlas_uv_scale
-				])
-				draw_polygon(pts, tri_colors, uvs, atlas)
-		else:
-			# 回退：着色多边形
-			var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
-			draw_colored_polygon(pts, color_base_bot)
-			var pts_inner: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 3.5)
-			draw_colored_polygon(pts_inner, color_base_top)
-			_draw_top_highlight(pts_inner, color_inner_hi)
-			var pts_closed := pts.duplicate()
-			pts_closed.append(pts[0])
-			draw_polyline(pts_closed, color_border, 1.6, true)
-
-	# ---- 2) 敌方 ZoC（最底层叠加） ----
+	# ---- 1) 敌方 ZoC（最底层叠加） ----
 	for axial in _highlight_zoc:
 		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
 		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
@@ -583,6 +790,77 @@ func _draw() -> void:
 		var pts_closed := pts.duplicate()
 		pts_closed.append(pts[0])
 		draw_polyline(pts_closed, color_selected, 2.8, true)
+
+	# ---- 9) 战争迷雾（覆盖在所有高亮之上） ----
+	if fog_enabled:
+		# 迷雾遮罩半径：地形最大波浪半径(HEX_SIZE+3.5)+边缘扰动(EDGE_JITTER=10)≈HEX_SIZE+14
+		# 用规则六边形保持迷雾边缘整齐，但要足够大以完全覆盖波浪地形外缘
+		const FOG_RADIUS: float = HEX_SIZE + 14.0
+		# 已探索但当前不可见：用与地形一致的无缝波浪边界画暗色。
+		#   （之前用 FOG_RADIUS 规则大六边形，半径远大于格距 → 相邻遮罩大面积重叠，
+		#    半透明叠加后形成菱形深色条纹；改用每格边界多边形后相邻格共享顶点，不重叠。）
+		for axial in _explored_hexes.keys():
+			if _visible_hexes.has(axial):
+				continue
+			var ex_pts: PackedVector2Array = _hex_border_cache.get(axial, PackedVector2Array())
+			if ex_pts.is_empty():
+				# 障碍格等无波浪缓存：用规则六边形（半径 HEX_SIZE 完美平铺，无重叠）
+				var ex_center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+				ex_pts = HexCoord.corners(ex_center, HEX_SIZE)
+			draw_colored_polygon(ex_pts, Color(0.02, 0.02, 0.04, 0.58))
+		# 从未探索过：近黑大六边形遮罩（alpha 高，重叠不可见，确保格缝全黑）
+		var fog_targets: Array = _hexes.keys() + _obstacles.keys()
+		for axial in fog_targets:
+			if _visible_hexes.has(axial) or _explored_hexes.has(axial):
+				continue
+			var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+			var pts: PackedVector2Array = HexCoord.corners(center, FOG_RADIUS)
+			draw_colored_polygon(pts, Color(0.0, 0.0, 0.0, 0.92))
+
+
+## ──────────── 战争迷雾 API ────────────
+
+## 根据友方单位位置更新视野
+##   friendly_units: 友方单位数组（通常 faction == 0）
+##   sight_range: 视野半径，默认 5 格
+func update_fog_of_war(friendly_units: Array, sight_range: int = DEFAULT_SIGHT_RANGE) -> void:
+	_visible_hexes.clear()
+	# 标记视野内所有格子可见（可走格 + 障碍格一视同仁，仅按位置判定）
+	for u in friendly_units:
+		if u == null or not u.is_alive():
+			continue
+		var axial: Vector2i = u.axial_pos
+		var in_range: Array[Vector2i] = _get_hexes_in_range(axial, sight_range)
+		for h in in_range:
+			if _hexes.has(h) or _obstacles.has(h):
+				_visible_hexes[h] = true
+				_explored_hexes[h] = true
+	queue_redraw()
+
+
+## 获取某点周围 radius 范围内的所有 hex（环形范围，含中心）
+func _get_hexes_in_range(center: Vector2i, radius: int) -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	for dq in range(-radius, radius + 1):
+		var dr_min: int = max(-radius, -dq - radius)
+		var dr_max: int = min(radius, -dq + radius)
+		for dr in range(dr_min, dr_max + 1):
+			result.append(center + Vector2i(dq, dr))
+	return result
+
+
+## 指定格子当前是否可见
+func is_hex_visible(axial: Vector2i) -> bool:
+	if not fog_enabled:
+		return true
+	return _visible_hexes.has(axial)
+
+
+## 指定格子是否曾探索过（即使现在不可见）
+func is_hex_explored(axial: Vector2i) -> bool:
+	if not fog_enabled:
+		return true
+	return _explored_hexes.has(axial)
 
 
 ## 在六边形"上半"3 条边沿内侧画一条更亮的细线，营造"内凹光照"感

@@ -16,6 +16,7 @@ signal stats_changed(unit)                 ## 属性变化（用于 UI 刷新）
 @export var stats: Stats
 @export var weapon: WeaponData
 @export var armor: ArmorData
+var job = null       ## JobClass 实例，由 BattleScene spawn 时从 JobDB 注入
 
 # ──── 先发制人技能相关（G2） ────
 var preempt_active: bool = false            ## 先发制人是否激活
@@ -136,6 +137,13 @@ func get_unit_name() -> String:
 	return stats.unit_name if stats else "?"
 
 
+## 当前装备的武器是否不在职业武器池内（触发「手拙」debuff）
+func has_unfamiliar_weapon() -> bool:
+	if job == null or weapon == null:
+		return false
+	return not job.has_weapon(weapon.id)
+
+
 func is_alive() -> bool:
 	return stats and stats.is_alive()
 
@@ -248,6 +256,21 @@ func move_along_path(path: Array[Vector2i]) -> bool:
 func _animate_path(path: Array[Vector2i]) -> void:
 	var from: Vector2i = axial_pos
 	_registered_at_pos = true  ## 移动开始时，self 在 _occupants 中
+
+	# ── 跳跃检测：中间格子（不含目的地）存在存活友方单位 ──
+	var has_ally_in_path: bool = false
+	for i in range(0, path.size() - 1):
+		var mid_occ = hex_grid.get_occupant(path[i])
+		if mid_occ != null and mid_occ != self \
+				and mid_occ.has_method("is_alive") and mid_occ.is_alive() \
+				and mid_occ.has_method("get_faction") \
+				and mid_occ.get_faction() == get_faction():
+			has_ally_in_path = true
+			break
+	if has_ally_in_path:
+		await _jump_along_path(path, from)
+		return
+
 	for step in path:
 		# 1) 触发借机攻击的判定（六边形版改良规则）：
 		#    敌人 X 之前与你相邻（你在 X 的 ZoC 内）→ 本步无论你怎么动都触发：
@@ -304,6 +327,19 @@ func _animate_path(path: Array[Vector2i]) -> void:
 
 		# 5) 更新占用（穿过友方格子时不覆盖友方）
 		var step_occ = hex_grid.get_occupant(step)
+
+		# ── 硬性保险：如果这一步是敌方存活单位所在格，立刻停在上一格 ──
+		var step_has_enemy: bool = step_occ != null and step_occ != self \
+			and step_occ.has_method("get_faction") and step_occ.get_faction() != get_faction() \
+			and step_occ.has_method("is_alive") and step_occ.is_alive()
+		if step_has_enemy:
+			if not _registered_at_pos:
+				hex_grid.set_occupant(axial_pos, self)
+				_registered_at_pos = true
+			ignore_oa_this_move = false
+			stats_changed.emit(self)
+			return
+
 		var step_has_friendly: bool = step_occ != null and step_occ != self \
 			and step_occ.has_method("is_alive") and step_occ.is_alive() \
 			and step_occ.has_method("get_faction") and step_occ.get_faction() == get_faction()
@@ -328,6 +364,69 @@ func _animate_path(path: Array[Vector2i]) -> void:
 			get_unit_name(), axial_pos, position, expected_px, str(position - expected_px)
 		])
 	ignore_oa_this_move = false  # 移动结束，清除滑步标志
+	stats_changed.emit(self)
+
+
+## 跳跃移动：路径中含友方单位时触发，直接落到目的地（跳过中间格 OA）。
+## 绝对准则仍生效：出发格若在敌人 ZoC 内，仍触发借机攻击（命中则中断跳跃）。
+## AP / 疲劳按真实路径长度照扣（和走路一样）。
+func _jump_along_path(path: Array[Vector2i], from: Vector2i) -> void:
+	var steps: int = path.size()
+	var dest_axial: Vector2i = path[-1]
+
+	# ── 出发格 OA 判定（绝对准则：在敌人周身 1 格内就触发）──
+	var leaving_ctrls: Array = hex_grid.get_zoc_controllers(axial_pos, get_faction())
+	# 扣除第一步 AP/疲劳（无论是否被命中都扣，BB 赔了夫人又折兵规则）
+	stats.spend_ap(AP_PER_HEX)
+	stats.add_fatigue(FATIGUE_PER_HEX)
+	for ctrl in leaving_ctrls:
+		if not is_alive():
+			break
+		var oa_result: Dictionary = DamageSystem.execute_attack(ctrl, self)
+		oa_result["is_opportunity_attack"] = true
+		var def_fat: int = DamageSystem.calculate_defend_fatigue(self)
+		if def_fat > 0:
+			stats.add_fatigue(def_fat)
+			oa_result["defend_fatigue"] = def_fat
+		_apply_attack_result(ctrl, self, oa_result)
+		ctrl.attacked.emit(ctrl, self, oa_result)
+		if oa_result.get("hit", false) or not is_alive():
+			# 命中/死亡 → 中断跳跃，留在原地
+			if not _registered_at_pos:
+				hex_grid.set_occupant(axial_pos, self)
+				_registered_at_pos = true
+			stats_changed.emit(self)
+			return
+
+	# 扣除剩余路径的 AP/疲劳
+	if steps > 1:
+		stats.spend_ap(AP_PER_HEX * (steps - 1))
+		stats.add_fatigue(FATIGUE_PER_HEX * (steps - 1))
+
+	# ── 抛物线动画：跳过中间格，不触发中间 OA ──
+	var start_px: Vector2 = position
+	var end_px: Vector2 = HexCoord.axial_to_pixel(dest_axial, HexGrid.HEX_SIZE)
+	var arc_height: float = clamp(steps * 8.0, 30.0, 80.0)
+	var duration: float = clamp(steps * 0.07, 0.18, 0.55)
+	var tween := create_tween()
+	tween.tween_method(
+		func(t: float) -> void:
+			var lerp_pos: Vector2 = start_px.lerp(end_px, t)
+			var arc: float = arc_height * 4.0 * t * (1.0 - t)
+			position = lerp_pos + Vector2(0.0, -arc),
+		0.0, 1.0, duration
+	)
+	await tween.finished
+	position = end_px
+
+	# 更新占用注册
+	if _registered_at_pos:
+		hex_grid.set_occupant(axial_pos, null)
+	hex_grid.set_occupant(dest_axial, self)
+	_registered_at_pos = true
+	axial_pos = dest_axial
+
+	moved.emit(self, from, dest_axial)
 	stats_changed.emit(self)
 
 
@@ -371,6 +470,8 @@ func attack_target(target: Unit, attack_mode: String = "") -> Dictionary:
 	# 如果没指定攻击模式，默认用第一个
 	var mode: String = attack_mode if not attack_mode.is_empty() else (weapon.attack_modes[0] if not weapon.attack_modes.is_empty() else weapon.damage_type)
 	var options: Dictionary = {"mode": mode} if not mode.is_empty() else {}
+	# 武器专精：在职业武器池内 1.0，否则 0.9（手拙）
+	options["mastery_dmg"] = 0.9 if has_unfamiliar_weapon() else 1.0
 	var result: Dictionary = DamageSystem.execute_attack(self, target, options)
 
 	# 防守方被攻击气力消耗（design.md § 三：命中/闪避/格挡均触发）

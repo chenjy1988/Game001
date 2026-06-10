@@ -1,60 +1,161 @@
 extends Resource
 class_name WeaponData
 ##
-## WeaponData.gd — 武器数据类
+## WeaponData.gd — 武器数据类（v3.1 schema）
 ##
-## 战兄弟武器关键属性：基础伤害、对甲效率、穿甲率。
-## 不同武器倾向不同战术：
-##   - 锤/斧：高对甲效率（armor_effectiveness > 1.0），擅长破甲
-##   - 矛/穿刺武器：高穿甲率（armor_penetration），无视部分护甲直击 HP
-##   - 剑：平衡型
-##   - 匕首 Puncture：极高穿甲，用于无视护甲直击肉体（剥甲战术保留盔甲）
+## 字段定义见 design/weapon-system.md § 3.1。
+## 数据源：data/weapons.json（autoload `WeaponArmorDB` 启动时反序列化）。
+##
+## 攻击类型 + weight × 渗透公式（Phase 2 重构核心）：
+##   - attack_modes：武器支持的攻击模式列表（slash / pierce / crush）
+##   - damage_base：单一基础伤害（取消 min/max，浮动来自气力档位）
+##   - weight：武器重量；既影响 Initiative 惩罚，又驱动渗透公式
+##       penetration = base_rate(by_type) × (1 + max(0, (weight - 4) / 6))
 ##
 
+# ──────────── 基础标识 ────────────
 @export var id: String = "sword"
 @export var display_name: String = "短剑"
 
-## 基础伤害（每次攻击 roll 之前的基准值）
+# ──────────── 战斗模型 v3.1 核心字段（新）────────────
+
+## 武器支持的攻击模式列表，元素来自 {"slash", "pierce", "crush"}
+## 单模式武器（如横刀只有 slash）= ["slash"]
+## 双模式武器（如剑/陌刀 = slash + pierce）= ["slash", "pierce"]
+@export var attack_modes: Array[String] = ["slash"]
+
+## 基础伤害（取消 min/max；浮动来自气力档位 + 微小波动）
+@export var damage_base: int = 40
+
+## 武器重量（决定 Init 惩罚 + 渗透 weight_modifier）
+## 范围 0~16；典型值：匕首 0 / 横刀 6 / 陌刀 14 / 双手战锤 16
+@export var weight: int = 6
+
+## 命中修正（单模式武器使用）
+@export var hit_modifier: int = 0
+
+## 命中修正（双模式武器使用，按 mode 字符串映射；为空则回落到 hit_modifier）
+@export var hit_modifier_by_mode: Dictionary = {}
+
+## 头部命中基础概率（百分比）—— 25% 单手 / 15% 双手
+@export var head_chance: int = 25
+
+## 瞄头时的命中惩罚（单模式）
+@export var aim_head_penalty: int = -20
+
+## 瞄头时的命中惩罚（双模式按 mode 字符串映射；为空则回落到 aim_head_penalty）
+@export var aim_head_penalty_by_mode: Dictionary = {}
+
+## 是否双手武器（占用副手槽，禁用瞄头单手专属能力）
+@export var two_handed: bool = false
+
+## 是否拥有 great_swing（横扫千军接口预留）
+@export var great_swing: bool = false
+
+## 远程武器发射后再次发射所需的上弦 AP（弩用；其他为 0）
+@export var reload_ap: int = 0
+
+## 武器自带 base_block（用于格挡公式）
+##   设计参考：盾 25 / 陌刀 15 / 双手剑 12 / 长矛 10 / 横刀 8 / 单手斧 5 / 匕首 3 / 战锤 0 / 弓弩 0
+@export var block_value: int = 0
+
+# ──────────── 通用字段 ────────────
+
+## 攻击 AP 消耗（普攻 base_ap_cost；具体能力从 Ability 加附加 AP）
+@export var ap_cost: int = 4
+
+## 攻击距离范围 [min, max]（hex 格数）；近战 [1,1]，长矛 [1,2]，弓 [2,5]，弩 [2,6]
+@export var range_min: int = 1
+@export var range_max: int = 1
+
+## 武器类型："melee" / "ranged"
+@export var weapon_type: String = "melee"
+
+## 武器在角色身上的 sprite 路径
+@export var sprite: String = ""
+
+# ──────────── 旧字段（DEPRECATED，过渡期保留 1 版）────────────
+##
+## 以下字段在 weapons.json v3.1 schema 已不存在，但代码层（DamageSystem 旧版 calculate_damage、
+## SidePanel 显示）可能仍在引用。Phase 2 A2 完成后清理。
+## 新代码请使用 damage_base / attack_modes / weight 等新字段。
+
+## DEPRECATED：旧 min/max 伤害（v3.1 用 damage_base 替代）
 @export var damage_min: int = 35
 @export var damage_max: int = 50
 
-## 对甲效率：基础伤害 × 此值 = 对护甲造成的伤害
-## > 1.0 表示破甲特化（锤/斧），< 1.0 表示对甲拙劣（穿刺武器）
+## DEPRECATED：旧对甲效率（v3.1 用 attack_modes + armor_mult 表替代）
 @export var armor_effectiveness: float = 1.0
 
-## 穿甲率：基础伤害 × 此值 = 直接绕过护甲打到 HP 的伤害
-## 0.0 表示完全无穿甲（普通钝器），1.0 表示完全无视护甲（极少见）
+## DEPRECATED：旧穿甲率（v3.1 用 weight × 渗透公式替代）
 @export var armor_penetration: float = 0.0
 
-## AP / Fatigue 消耗
-@export var ap_cost: int = 4
+## DEPRECATED：旧 fatigue_cost（v3.1 用 base_stamina × weight_mult 公式替代）
 @export var fatigue_cost: int = 6
 
-## 攻击距离（hex 格数），近战为 1，长矛为 2，远程更远
+## DEPRECATED：旧 attack_range（v3.1 用 range_min/range_max 替代）
 @export var attack_range: int = 1
 
-## 头部命中伤害倍率（战兄弟规则：头部伤害 +50%）
+## DEPRECATED：旧头部伤害倍率（v3.1 全局 1.5，不再每武器配置）
 @export var head_damage_mult: float = 1.5
 
-## 暴击伤害倍率（最终 HP 伤害再 ×此值）
+## DEPRECATED：旧暴击倍率（v3.1 全局 1.5）
 @export var crit_mult: float = 1.5
 
-## 额外暴击概率（叠加到基础 5%）
-## 暴击阈值 = 0.05 + bonus_crit_chance；匕首等精准武器可拉高
+## DEPRECATED：旧额外暴击概率（v3.1 用职业精通 + Wisdom 取代）
 @export var bonus_crit_chance: float = 0.0
 
-## 武器类型：melee / ranged
-@export var weapon_type: String = "melee"
+## DEPRECATED：旧"伤害类型"字段（v3.1 升级为 attack_modes 数组）
+##   仍由旧 DamageSystem 代码读取以查 9 格 HP 渗透表；
+##   过渡期：若 attack_modes 非空则取首项填充本字段以保持兼容
+@export var damage_type: String = "slash"
+
+## DEPRECATED：旧 base_block 字段（v3.1 用 block_value）
+@export var base_block: int = 0
 
 
+# ──────────── 工具方法 ────────────
+
+## 取武器在指定 mode 下的命中修正
+func get_hit_modifier(mode: String) -> int:
+	if hit_modifier_by_mode and hit_modifier_by_mode.has(mode):
+		return int(hit_modifier_by_mode[mode])
+	return hit_modifier
+
+
+## 取武器在指定 mode 下的瞄头命中惩罚
+func get_aim_head_penalty(mode: String) -> int:
+	if aim_head_penalty_by_mode and aim_head_penalty_by_mode.has(mode):
+		return int(aim_head_penalty_by_mode[mode])
+	return aim_head_penalty
+
+
+## 武器是否支持指定攻击模式
+func supports_mode(mode: String) -> bool:
+	return mode in attack_modes
+
+
+## 取主攻击模式（attack_modes[0]，无则回落到 damage_type 兼容字段）
+func primary_mode() -> String:
+	if not attack_modes.is_empty():
+		return attack_modes[0]
+	return damage_type
+
+
+## 渗透 weight_modifier：实际渗透 = base_rate × (1 + max(0, (weight - 4) / 6))
+func weight_modifier() -> float:
+	return 1.0 + max(0.0, (float(weight) - 4.0) / 6.0)
+
+
+## DEPRECATED：旧伤害 roll；新公式用 damage_base，过渡期保留
 func roll_base_damage() -> int:
+	if damage_base > 0:
+		return damage_base
 	return randi_range(damage_min, damage_max)
 
 
 func to_string_brief() -> String:
-	var crit_pct: int = int(round((0.05 + bonus_crit_chance) * 100))
-	return "%s(伤%d-%d 对甲%.0f%% 穿甲%.0f%% 暴%d%%×%.1f AP%d)" % [
-		display_name, damage_min, damage_max,
-		armor_effectiveness * 100, armor_penetration * 100,
-		crit_pct, crit_mult, ap_cost
+	var modes: String = ",".join(attack_modes) if not attack_modes.is_empty() else damage_type
+	return "%s(base %d / wt %d / %s / AP %d / blk %d)" % [
+		display_name, damage_base, weight, modes, ap_cost, block_value
 	]

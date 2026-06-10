@@ -33,7 +33,7 @@ const SCREEN_MARGIN: int = 12
 const PORTRAIT_SIZE: int = 50               ## 头像方块尺寸（与按钮高度对齐）
 const FIXED_BUTTON_W: int = 56              ## 固定字母键 chip 宽度
 
-const BAR_HEIGHT: int = 8
+const BAR_HEIGHT: int = 14
 const BAR_HP_COLOR: Color = Color(0.78, 0.22, 0.22)
 const BAR_AP_COLOR: Color = Color(0.92, 0.78, 0.20)
 const BAR_HEAD_COLOR: Color = Color(0.55, 0.55, 0.55)
@@ -113,6 +113,7 @@ var _fatigue_value: Label = null
 var _speed_label: Label = null
 var _weapon_label: Label = null
 var _armor_label: Label = null
+var _attr_labels: Array = []   ## 属性标签 [决心, 近战, 防御, 移动, 智识]
 
 
 func _ready() -> void:
@@ -462,6 +463,9 @@ func _rebuild_action_list() -> void:
 func _refresh_action_states() -> void:
 	if _current_unit == null:
 		return
+	# 每次刷新状态时重置 chip 高亮（攻击完成/切换单位后清除金色高亮）
+	for b in _action_buttons:
+		b.modulate = Color.WHITE
 	var u: Unit = _current_unit
 	var ap: int = u.stats.ap if u.stats else 0
 	# 动态 chip：仅 attack 类需要根据 AP 重判
@@ -535,6 +539,14 @@ func _refresh_unit_info() -> void:
 	else:
 		_armor_label.text = "护甲：（无）"
 
+	# 更新属性行
+	if _attr_labels.size() >= 5:
+		_attr_labels[0].text = str(s.resolve)
+		_attr_labels[1].text = str(s.melee_skill)
+		_attr_labels[2].text = str(s.melee_defense)
+		_attr_labels[3].text = str(s.move_range)
+		_attr_labels[4].text = str(s.wisdom)
+
 
 # ──────────── 屏幕定位 ────────────
 
@@ -567,10 +579,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var ke: InputEventKey = event as InputEventKey
 
 	# 固定字母键
-	# G5：E 键触发先发制人预览
+	# E 键触发先发制人（直接执行，不只是预览）
 	if ke.keycode == KEY_E:
-		if _current_unit:
-			ability_preview_requested.emit("preempt", _current_unit)
+		if not _preempt_btn.disabled:
+			action_selected.emit("preempt")
 		get_viewport().set_input_as_handled()
 		return
 
@@ -613,6 +625,13 @@ func _invoke_action(idx: int) -> void:
 	var act: Dictionary = _action_list[idx]
 	if act.get("locked", false):
 		return
+	# 高亮选中的 attack chip，给用户视觉反馈
+	for i in range(_action_buttons.size()):
+		var b: Button = _action_buttons[i]
+		if i == idx and act.get("kind", "") == KIND_ATTACK:
+			b.modulate = Color(1.4, 1.1, 0.4)   # 金色高亮 = "已选择攻击模式"
+		else:
+			b.modulate = Color.WHITE
 	# 攻击/技能 → 把 action_id 抛给 BattleScene 路由
 	action_selected.emit(act["id"])
 
@@ -802,25 +821,37 @@ func _build_detail_section() -> Control:
 	name_row.add_child(_faction_label)
 	vb.add_child(name_row)
 
-	# 行 2: 2 列 × 3 行 grid 数据条
-	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 12)
-	grid.add_theme_constant_override("v_separation", 3)
-
+	# 行 2: 3 行 × 2 列数据条（HBoxContainer 代替 GridContainer，保证 bar 能 expand）
 	_hp_bar = ProgressBar.new(); _hp_value = Label.new()
-	grid.add_child(_make_stat_row("HP", _hp_bar, _hp_value, BAR_HP_COLOR))
 	_ap_bar = ProgressBar.new(); _ap_value = Label.new()
-	grid.add_child(_make_stat_row("AP", _ap_bar, _ap_value, BAR_AP_COLOR))
+	var row1 := HBoxContainer.new()
+	row1.add_theme_constant_override("separation", 12)
+	var hp_row := _make_stat_row("HP", _hp_bar, _hp_value, BAR_HP_COLOR)
+	hp_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var ap_row := _make_stat_row("AP", _ap_bar, _ap_value, BAR_AP_COLOR)
+	ap_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row1.add_child(hp_row); row1.add_child(ap_row)
+	vb.add_child(row1)
+
 	_head_bar = ProgressBar.new(); _head_value = Label.new()
-	grid.add_child(_make_stat_row("头甲", _head_bar, _head_value, BAR_HEAD_COLOR))
 	_body_bar = ProgressBar.new(); _body_value = Label.new()
-	grid.add_child(_make_stat_row("身甲", _body_bar, _body_value, BAR_BODY_COLOR))
+	var row2 := HBoxContainer.new()
+	row2.add_theme_constant_override("separation", 12)
+	var head_row := _make_stat_row("头甲", _head_bar, _head_value, BAR_HEAD_COLOR)
+	head_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var body_row := _make_stat_row("身甲", _body_bar, _body_value, BAR_BODY_COLOR)
+	body_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row2.add_child(head_row); row2.add_child(body_row)
+	vb.add_child(row2)
+
 	_fatigue_bar = ProgressBar.new(); _fatigue_value = Label.new()
-	grid.add_child(_make_stat_row("气力", _fatigue_bar, _fatigue_value, BAR_FATIGUE_COLOR))
-	# 第 6 格：速度
+	var row3 := HBoxContainer.new()
+	row3.add_theme_constant_override("separation", 12)
+	var fatigue_row := _make_stat_row("气力", _fatigue_bar, _fatigue_value, BAR_FATIGUE_COLOR)
+	fatigue_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var speed_box := HBoxContainer.new()
 	speed_box.add_theme_constant_override("separation", 6)
+	speed_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var speed_lbl := Label.new()
 	speed_lbl.text = "速度"
 	speed_lbl.custom_minimum_size = Vector2(36, 0)
@@ -833,10 +864,34 @@ func _build_detail_section() -> Control:
 	_speed_label.clip_text = true
 	_speed_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	speed_box.add_child(_speed_label)
-	grid.add_child(speed_box)
-	vb.add_child(grid)
+	row3.add_child(fatigue_row); row3.add_child(speed_box)
+	vb.add_child(row3)
 
-	# 行 3: 武器 + 护甲
+	# 行 3: 属性（决心/近战/防御/移动力/智识）
+	var attr_grid := GridContainer.new()
+	attr_grid.columns = 5
+	attr_grid.add_theme_constant_override("h_separation", 10)
+	attr_grid.add_theme_constant_override("v_separation", 2)
+	_attr_labels = []
+	for tag in ["决心", "近战", "防御", "移动", "智识"]:
+		var attr_vb := VBoxContainer.new()
+		attr_vb.add_theme_constant_override("separation", 0)
+		var attr_name := Label.new()
+		attr_name.text = tag
+		attr_name.add_theme_font_size_override("font_size", 9)
+		attr_name.add_theme_color_override("font_color", Color(0.55, 0.52, 0.45))
+		attr_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		attr_vb.add_child(attr_name)
+		var attr_val := Label.new()
+		attr_val.add_theme_font_size_override("font_size", 12)
+		attr_val.add_theme_color_override("font_color", Color(0.92, 0.88, 0.72))
+		attr_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		attr_vb.add_child(attr_val)
+		_attr_labels.append(attr_val)
+		attr_grid.add_child(attr_vb)
+	vb.add_child(attr_grid)
+
+	# 行 4: 武器 + 护甲
 	_weapon_label = Label.new()
 	_weapon_label.add_theme_font_size_override("font_size", 10)
 	_weapon_label.add_theme_color_override("font_color", Color(0.85, 0.78, 0.55))
@@ -849,7 +904,7 @@ func _build_detail_section() -> Control:
 	_armor_label.clip_text = true
 	vb.add_child(_armor_label)
 
-	# 行 4: 提示
+	# 行 5: 提示
 	var hint := Label.new()
 	hint.text = "[P] 切换详情"
 	hint.add_theme_font_size_override("font_size", 9)
@@ -860,7 +915,7 @@ func _build_detail_section() -> Control:
 	return vb
 
 
-## 数值条单行：[标签 36px][进度条 expand][数值 64px]
+## 数值条单行：[标签 36px][进度条+数值叠加居中]
 func _make_stat_row(label_text: String, bar: ProgressBar, value_label: Label, color: Color) -> Control:
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", 6)
@@ -872,29 +927,38 @@ func _make_stat_row(label_text: String, bar: ProgressBar, value_label: Label, co
 	lbl.add_theme_color_override("font_color", Color(0.85, 0.82, 0.70))
 	hb.add_child(lbl)
 
+	# 叠加容器：bar 铺满，value_label 居中叠在上面
+	var overlay := Control.new()
+	overlay.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	overlay.custom_minimum_size = Vector2(0, BAR_HEIGHT)
+
 	bar.show_percentage = false
 	bar.custom_minimum_size = Vector2(0, BAR_HEIGHT)
-	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	bar.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var bg := StyleBoxFlat.new()
 	bg.bg_color = Color(0.12, 0.10, 0.08, 1.0)
-	bg.corner_radius_top_left = 2
-	bg.corner_radius_top_right = 2
-	bg.corner_radius_bottom_left = 2
-	bg.corner_radius_bottom_right = 2
+	bg.border_color = Color(0.30, 0.26, 0.20)
+	bg.border_width_left = 1; bg.border_width_right = 1
+	bg.border_width_top = 1; bg.border_width_bottom = 1
+	bg.corner_radius_top_left = 2; bg.corner_radius_top_right = 2
+	bg.corner_radius_bottom_left = 2; bg.corner_radius_bottom_right = 2
 	bar.add_theme_stylebox_override("background", bg)
 	var fg := StyleBoxFlat.new()
 	fg.bg_color = color
-	fg.corner_radius_top_left = 2
-	fg.corner_radius_top_right = 2
-	fg.corner_radius_bottom_left = 2
-	fg.corner_radius_bottom_right = 2
+	fg.corner_radius_top_left = 2; fg.corner_radius_top_right = 2
+	fg.corner_radius_bottom_left = 2; fg.corner_radius_bottom_right = 2
 	bar.add_theme_stylebox_override("fill", fg)
-	hb.add_child(bar)
+	overlay.add_child(bar)
 
-	value_label.custom_minimum_size = Vector2(64, 0)
-	value_label.add_theme_font_size_override("font_size", 10)
-	value_label.add_theme_color_override("font_color", Color(0.92, 0.88, 0.72))
-	value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	hb.add_child(value_label)
+	value_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	value_label.add_theme_font_size_override("font_size", 11)
+	value_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0))
+	value_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0))
+	value_label.add_theme_constant_override("outline_size", 2)
+	value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	value_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	value_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	overlay.add_child(value_label)
+
+	hb.add_child(overlay)
 	return hb
