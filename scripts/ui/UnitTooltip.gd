@@ -371,10 +371,10 @@ func _refresh_attack_preview() -> void:
 	# 行 2 命中率：百分比，并附"未围攻时的基础命中率"对照
 	var pct: int = int(round(chance * 100.0))
 	_atk_hit_label.text = "命中 %d%%" % pct
-	# 行 3 围攻加成（仅当至少 1 名友军围攻才显示）
+	# 行 3 围攻命中加成（仅显示 +X%）
 	if allies > 0 and bonus > 0.0:
 		var bpct: int = int(round(bonus * 100.0))
-		_atk_overwhelm_label.text = "▲ 围攻 +%d%%（%d 名友军包夹）" % [bpct, allies]
+		_atk_overwhelm_label.text = "+%d%%" % bpct
 		_atk_overwhelm_label.visible = true
 	else:
 		_atk_overwhelm_label.visible = false
@@ -400,7 +400,7 @@ func show_for(unit: Unit, screen_pos: Vector2) -> void:
 
 
 ## 攻击者悬停在可攻击敌人 target 上时调用：浮层立即出现，
-## 顶部展示"命中 NN%"和"围攻 +X%（N 名友军包夹）"。
+## 顶部展示"命中 NN%"与围攻命中加成"+X%"。
 func show_for_attack(target: Unit, attacker: Unit, screen_pos: Vector2) -> void:
 	if target == null or target.stats == null or not target.is_alive():
 		_disconnect_unit()

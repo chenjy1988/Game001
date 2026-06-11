@@ -6,9 +6,9 @@
     "crit_mult": "全局 1.5",
     "double_grip_bonus": "0.25（单手武器空副手）",
     "precision_attack": "精准攻击统一：命中+15、头部近战55%/远程50%、AP攻+2，武器间无差异",
-    "penetration_formula": "实际渗透 = 攻击类型基础率 × (1 + max(0, (weight - 4) / 6))",
+    "penetration_formula": "渗透率 = 基础率 × (1 + max(0, (weight-4)/6))；透甲HP = 实际扣甲×渗透率；击穿后HP = (final_damage-实际扣甲)×hp_mult",
     "base_penetration_by_type": {"slash": 0.10, "pierce": 0.15, "crush": 0.08},
-    "crit_penetration_by_type": {"slash": 0.20, "pierce": 0.30, "crush": 0.16}
+    "crit_penetration_note": "全局暴击只提供最终伤害 +50%；匕首等流派可通过专属技能提升暴击时的 HP 渗透"
   },
   "weapons": [
     {
@@ -16,7 +16,7 @@
       "display_name": "匕首",
       "attack_modes": ["pierce"],
       "damage_base": 28,
-      "ap_cost": 3,
+      "ap_cost": 4,
       "range": [1, 1],
       "block_value": 3,
       "weight": 0,
@@ -24,8 +24,8 @@
       "head_chance": 25,
       "two_handed": false,
       "weapon_type": "melee",
-      "_actual_penetration": "Pierce 0.15 / 暴击 0.30",
-      "_comment": "Pierce 单手最轻；穿心刺解锁后可完全无视护甲（专属职业能力）"
+      "_actual_penetration": "Pierce 0.15（高级专精 0.30）",
+      "_comment": "Pierce 单手最轻；初级专精 AP 4→3；穿心刺可完全无视护甲"
     },
     {
       "id": "saber",
@@ -40,7 +40,7 @@
       "head_chance": 25,
       "two_handed": false,
       "weapon_type": "melee",
-      "_actual_penetration": "Slash 0.133 / 暴击 0.267",
+      "_actual_penetration": "Slash 0.133",
       "_comment": "唐军制式：Slash 单模式 / 中 block / 稳定砍劈"
     },
     {
@@ -56,7 +56,7 @@
       "head_chance": 25,
       "two_handed": false,
       "weapon_type": "melee",
-      "_actual_penetration": "Slash 0.133 / Pierce 0.20 / 暴击 Slash 0.267 / 暴击 Pierce 0.40",
+      "_actual_penetration": "Slash 0.133 / Pierce 0.20",
       "_comment": "双模式 ⭐ 玩家临场选 Slash 或 Pierce"
     },
     {
@@ -72,7 +72,7 @@
       "head_chance": 25,
       "two_handed": false,
       "weapon_type": "melee",
-      "_actual_penetration": "Pierce 0.20 / 暴击 0.40",
+      "_actual_penetration": "Pierce 0.20",
       "_comment": "跳荡用，单手戳刺；冲锋型武器"
     },
     {
@@ -88,7 +88,7 @@
       "head_chance": 25,
       "two_handed": false,
       "weapon_type": "melee",
-      "_actual_penetration": "Slash 0.20 / 暴击 0.40",
+      "_actual_penetration": "Slash 0.20",
       "_comment": "Slash 单手快砍；解锁'裂盾'专属能力（押衙/跳荡）"
     },
     {
@@ -104,7 +104,7 @@
       "head_chance": 25,
       "two_handed": false,
       "weapon_type": "melee",
-      "_actual_penetration": "Crush 0.133 / 暴击 0.267",
+      "_actual_penetration": "Crush 0.133",
       "_comment": "Crush 单手；普攻略快破甲，差异化靠'碎甲'+'击晕'专属能力"
     },
     {
@@ -121,7 +121,7 @@
       "two_handed": true,
       "great_swing": true,
       "weapon_type": "melee",
-      "_actual_penetration": "Pierce 0.35 / 暴击 0.70（modifier 2.33）⭐ 戳穿胸腔",
+      "_actual_penetration": "甲伤×35%（pen 0.35 × armor_mult 0.7 → 约 final×24.5% HP）",
       "_comment": "双手长杆，距离 2，反骑兵；解锁'架枪反骑'专属能力"
     },
     {
@@ -138,7 +138,7 @@
       "two_handed": true,
       "great_swing": true,
       "weapon_type": "melee",
-      "_actual_penetration": "Slash 0.267 / 暴击 0.534（modifier 2.67）⭐ 人马俱碎",
+      "_actual_penetration": "Slash 0.267（modifier 2.67）⭐ 人马俱碎",
       "_comment": "Slash 高伤主战；全力一击爆发型"
     },
     {
@@ -155,7 +155,7 @@
       "two_handed": true,
       "great_swing": true,
       "weapon_type": "melee",
-      "_actual_penetration": "Crush 0.24 / 暴击 0.48（modifier 3.0）⭐ 重锤钝击透甲",
+      "_actual_penetration": "Crush 0.24（modifier 3.0）⭐ 重锤钝击透甲",
       "_comment": "Crush 一击重击型；解锁'重击'专属能力"
     },
     {
@@ -172,8 +172,8 @@
       "two_handed": true,
       "great_swing": true,
       "weapon_type": "melee",
-      "_actual_penetration": "Slash 0.267 / Pierce 0.40 / 暴击 Slash 0.534 / 暴击 Pierce 0.80（modifier 2.67）⭐⭐ 戳穿心脏",
-      "_comment": "唐军王牌，双模式 ⭐ 全力一击 + 头部 + 暴击 + Pierce = 一击斩重甲（0.75% 概率）"
+      "_actual_penetration": "Slash 0.267 / Pierce 0.40（modifier 2.67）⭐⭐ 戳穿心脏",
+      "_comment": "唐军王牌，双模式 ⭐ 全力一击 + 头部 + 暴击 + Pierce = 高爆发，但暴击不再额外提高渗透"
     },
     {
       "id": "staff",
@@ -189,7 +189,7 @@
       "two_handed": true,
       "great_swing": false,
       "weapon_type": "melee",
-      "_actual_penetration": "Crush 0.107 / 暴击 0.213（modifier 1.33）",
+      "_actual_penetration": "Crush 0.107（modifier 1.33）",
       "_comment": "僧兵专属；双手长杆控场型 ⭐ 距离 2 + 高频普攻 + 棒打七寸 30% 眩晕"
     },
     {
@@ -205,7 +205,7 @@
       "head_chance": 25,
       "two_handed": true,
       "weapon_type": "ranged",
-      "_actual_penetration": "Pierce 0.15 / 暴击 0.30（modifier 1.0）",
+      "_actual_penetration": "Pierce 0.15（modifier 1.0）",
       "_comment": "通用远程；精准射击 +15% 命中"
     },
     {
@@ -221,7 +221,7 @@
       "head_chance": 25,
       "two_handed": true,
       "weapon_type": "ranged",
-      "_actual_penetration": "Pierce 0.175 / 暴击 0.35（modifier 1.17）",
+      "_actual_penetration": "Pierce 0.175（modifier 1.17）",
       "_comment": "蕃骑/回鹘弓手优选；层叠弓臂略重"
     },
     {
@@ -238,7 +238,7 @@
       "reload_ap": 3,
       "two_handed": true,
       "weapon_type": "ranged",
-      "_actual_penetration": "Pierce 0.35 / 暴击 0.70（modifier 2.33）⭐⭐ 真正点杀重弩",
+      "_actual_penetration": "Pierce 0.35（modifier 2.33）⭐⭐ 真正点杀重弩",
       "_comment": "弩手专属；金属弩臂极重；发射后上弦 3 AP；'抵近射击'专属能力"
     }
   ]

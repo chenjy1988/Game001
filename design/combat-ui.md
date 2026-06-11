@@ -269,7 +269,32 @@ func _on_combat_menu_action(action_id: String) -> void:
 
 ---
 
-## 十二、Phase 2.5+ 待补充（暂不做）
+## 十二、战斗预演（UnitTooltip）
+
+> 已实装：悬停敌人显示命中率 + 围攻（`phase2-todo.md` D2）。**性格手控偏差挂在此面板**，不另做确认流。
+
+悬停可攻击目标时，面板结构：
+
+```
+命中率 72%  （+10% 围攻）
+〔性格·好色〕命中异性：自身士气 -1 档     ← 琥珀色，提示结算代价
+```
+
+| 规则 | 说明 |
+|---|---|
+| 触发 | 友军有 `personality_id` 且预演条件命中（如好色 + 异性目标） |
+| 表现 | 追加 1 行代价/风味文案；**不灰化攻击、不拦点击、不改命中/伤害预演** |
+| 结算 | 性格 **不进 AI**；好色等在伤害结算后概率触发（见 `personality-system.md` §2.2） |
+| 日志 | 钩子触发时 **BattleLog 必追加** `【性格·xxx】`；贪财击杀另有笑声 |
+| 数据源 | `PersonalityDB.get_preview_hint(attacker, target, mode)` |
+
+贪财等 **结束回合冲动** 不走本面板，见 `personality-system.md` §2.1.1。
+
+**BattleLog**（左上角 `BattleScene` 面板 / `SidePanel.append_log`）：性格触发的士气、偏差等与伤害行同区展示，自动滚底。
+
+---
+
+## 十三、Phase 2.5+ 待补充（暂不做）
 
 - 攻击模式 chip 的 hover 预览（命中率 / 期望伤害实时计算）
 - 技能 chip 解锁后的 weapon_filter / job_filter（不擅长的技能不显示）

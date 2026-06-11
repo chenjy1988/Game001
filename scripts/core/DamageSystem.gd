@@ -1,5 +1,7 @@
 extends RefCounted
 class_name DamageSystem
+
+const _CombatModifier = preload("res://scripts/core/CombatModifier.gd")
 ##
 ## DamageSystem.gd — 战斗模型 v3.1 伤害管线（纯静态工具类）
 ##
@@ -11,7 +13,7 @@ class_name DamageSystem
 ##   Step 5: 暴击检定（5 + 武器 + 精通 + max(0,wisdom-40)*0.2，软上限 50%）
 ##   Step 6: 基础伤害（damage_base × 气力档 × 微波 × 专精 × 词条 × 能力 × 双手握持）
 ##   Step 7: 暴击 + 头部加法叠加（× 1.0 / 1.5 / 1.5 / 2.0）
-##   Step 8: 伤害分配（armor_mult + weight × 渗透 + 溢出 hp_mult + crush 暴击额外 +30）
+##   Step 8: 伤害分配（甲伤×armor_mult；透甲=实际扣甲×渗透率；击穿后=(final−扣甲)×hp_mult）
 ##   Step 9: 气力消耗（base_stamina × weight_mult + 隐藏气力消耗，由 Unit 实际扣减）
 ##
 ## 互斥规则：一次攻击只能选 1 个职业能力。当前未接入能力框架时默认普攻。
@@ -53,18 +55,12 @@ const HP_MULT_BY_TYPE: Dictionary = {
 	"crush":  0.7,
 }
 
-## 基础渗透率（普攻），实际渗透 = base_pen × weight_modifier
+## 基础渗透率（普攻）：破甲前透甲 HP = 实际扣甲 × (base_pen × weight_modifier)
 const BASE_PEN_BY_TYPE: Dictionary = {
 	"slash":  0.10,
 	"pierce": 0.15,
 	"crush":  0.08,
 }
-
-## 暴击下渗透率翻倍（仅基础率部分）
-const CRIT_PEN_MULT: float = 2.0
-
-## Crush + 暴击额外破甲（"震碎甲叶" 的固定加成）
-const CRUSH_CRIT_BONUS_ARMOR: int = 30
 
 # ──────────── 受击疲劳（design.md § 三 气力系统） ────────────
 ## 被攻击基础气力消耗（命中/闪避/格挡均触发）
@@ -80,10 +76,6 @@ static func calculate_defend_fatigue(target: Unit) -> int:
 	return int(ceil(float(DEFEND_FATIGUE_BASE) * weight_mult))
 
 # ──────────── 气力档位 → 伤害系数 ────────────
-const STAMINA_TIER_FRESH: float = 1.0       ## > 50%
-const STAMINA_TIER_MID: Vector2 = Vector2(0.85, 0.95)   ## 20-50%（随机区间）
-const STAMINA_TIER_LOW: Vector2 = Vector2(0.65, 0.85)   ## 1-20%
-const STAMINA_TIER_EXHAUST: float = 0.5     ## = 0%
 
 # ──────────── 微小波动 ────────────
 const DAMAGE_JITTER: Vector2 = Vector2(0.95, 1.05)
@@ -140,13 +132,12 @@ static func calculate_hit_chance(attacker: Unit, target: Unit, options: Dictiona
 	# 技能修正（ability_hit_modifier 单位：百分点，如 +15 / -10）
 	var skill_bonus: float = float(options.get("ability_hit_modifier", 0)) / 100.0
 
-	# Buff/Debuff 修正
+	# Buff/Debuff 修正（气力档 + 手拙等，经 get_active_debuffs 汇总）
 	var status_bonus: float = 0.0
-	if attacker.stats != null:
+	if attacker is Unit:
+		status_bonus += _CombatModifier.sum_hit_pct(attacker.get_active_debuffs())
+	elif attacker.stats != null:
 		status_bonus += attacker.stats.get_hit_modifier()
-	# 手拙 debuff（武器不在职业武器池内）
-	if attacker.has_method("has_unfamiliar_weapon") and attacker.has_unfamiliar_weapon():
-		status_bonus -= 0.10
 
 	return clamp(raw + overwhelm_bonus + terrain_bonus + skill_bonus + status_bonus,
 		HIT_CHANCE_MIN, HIT_CHANCE_MAX)
@@ -168,20 +159,9 @@ static func calculate_crit_chance(attacker: Unit) -> float:
 	return clamp(crit, 0.0, CRIT_SOFT_CAP) / 100.0
 
 
-## 当前气力档位对伤害的系数（Step 6 的一项）
-##   stamina_ratio = (max_stamina - fatigue) / max_stamina
+## 当前气力档 debuff 对伤害的系数（Step 6 的一项）
 static func stamina_tier_multiplier(stats: Stats) -> float:
-	if stats == null or stats.max_stamina <= 0:
-		return 1.0
-	var remaining: int = max(0, stats.max_stamina - stats.fatigue)
-	var ratio: float = float(remaining) / float(stats.max_stamina)
-	if ratio > 0.5:
-		return STAMINA_TIER_FRESH
-	if ratio > 0.2:
-		return randf_range(STAMINA_TIER_MID.x, STAMINA_TIER_MID.y)
-	if ratio > 0.0:
-		return randf_range(STAMINA_TIER_LOW.x, STAMINA_TIER_LOW.y)
-	return STAMINA_TIER_EXHAUST
+	return _CombatModifier.roll_stamina_damage_mult(stats)
 
 
 ## 武器渗透 weight_modifier
@@ -189,6 +169,16 @@ static func weight_modifier_for(weapon: WeaponData) -> float:
 	if weapon == null:
 		return 1.0
 	return weapon.weight_modifier()
+
+
+## UI 用：主模式渗透率预览（base_pen × weight_modifier）
+static func penetration_rate_for(weapon: WeaponData, mode: String = "") -> float:
+	if weapon == null:
+		return 0.0
+	var m: String = mode
+	if m.is_empty():
+		m = weapon.attack_modes[0] if not weapon.attack_modes.is_empty() else "slash"
+	return BASE_PEN_BY_TYPE.get(m, 0.10) * weight_modifier_for(weapon)
 
 
 # =====================================================================
@@ -304,7 +294,9 @@ static func execute_attack(attacker: Unit, target: Unit, options: Dictionary = {
 
 	# ── Step 6：基础伤害 ──
 	var damage_base: int = weapon.damage_base if (weapon and weapon.damage_base > 0) else weapon.roll_base_damage()
-	var stamina_mult: float = stamina_tier_multiplier(attacker.stats)
+	var stamina_mult: float = _CombatModifier.roll_damage_mult(attacker.get_active_debuffs()) \
+		if attacker is Unit \
+		else stamina_tier_multiplier(attacker.stats)
 	var jitter: float = randf_range(DAMAGE_JITTER.x, DAMAGE_JITTER.y)
 	var mastery_dmg: float = float(options.get("mastery_dmg", 1.0))
 	var trait_bonus: float = float(options.get("trait_damage_bonus", 0.0))
@@ -350,21 +342,13 @@ static func execute_attack(attacker: Unit, target: Unit, options: Dictionary = {
 
 		# 应扣护甲
 		var armor_damage_raw: float = final_damage_f * armor_mult
-		# crush 暴击额外破甲 +30
-		if is_crit and mode == "crush":
-			armor_damage_raw += float(CRUSH_CRIT_BONUS_ARMOR)
 		var armor_damage_int: int = int(round(armor_damage_raw))
 
-		# 渗透 HP（不论护甲是否破，都加这部分）
 		var base_pen: float = BASE_PEN_BY_TYPE.get(mode, 0.10)
-		if is_crit:
-			base_pen *= CRIT_PEN_MULT
 		var weight_mod: float = weight_modifier_for(weapon)
 		var pen_rate: float = base_pen * weight_mod
 		result["base_pen"] = base_pen
 		result["penetration_rate"] = pen_rate
-
-		var pen_hp_f: float = final_damage_f * pen_rate
 
 		# 攻甲前是否已无甲？
 		if current_armor <= 0:
@@ -372,21 +356,23 @@ static func execute_attack(attacker: Unit, target: Unit, options: Dictionary = {
 			hp_dealt_f = final_damage_f * hp_mult
 			armor_dealt = 0
 			result["armor_state"] = "no_armor"
+			result["penetration_hp"] = 0
 		else:
-			# 有甲：扣甲 + 计算溢出
-			var actually_taken: int = min(current_armor, armor_damage_int)
+			# 有甲：破甲前仅「实际扣甲 × 渗透率」；破甲后 final 余量照单全收（× hp_mult）
+			var absorbed_f: float = min(float(current_armor), armor_damage_raw)
+			var actually_taken: int = int(min(current_armor, armor_damage_int))
 			armor_dealt = actually_taken
-			var overflow: int = max(0, armor_damage_int - current_armor)
-			var overflow_hp_f: float = float(overflow) * hp_mult
+			var pen_hp_f: float = absorbed_f * pen_rate
+			var overflow_hp_f: float = 0.0
+			if armor_damage_int >= current_armor:
+				overflow_hp_f = max(0.0, final_damage_f - absorbed_f) * hp_mult
 			hp_dealt_f = pen_hp_f + overflow_hp_f
+			result["penetration_hp"] = int(round(pen_hp_f))
 			result["overflow_hp"] = int(round(overflow_hp_f))
-			# 护甲状态
 			if armor_damage_int >= current_armor:
 				result["armor_state"] = "broken"
 			else:
 				result["armor_state"] = "damaged"
-
-		result["penetration_hp"] = int(round(pen_hp_f))
 		# 兼容旧字段
 		result["pen_ratio"] = pen_rate
 

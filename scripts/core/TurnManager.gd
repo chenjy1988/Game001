@@ -41,6 +41,10 @@ var round_num: int = 0
 var _battle_running: bool = false
 
 
+func is_running() -> bool:
+	return _battle_running
+
+
 func register_units(units: Array) -> void:
 	_units.clear()
 	_turn_queue.clear()

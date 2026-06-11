@@ -90,7 +90,7 @@
 | Todo | 子任务 | 估时 |
 |---|---|---|
 | **A1** | WeaponData.gd 加新字段：`damage_base: int` / `weight: int` / `attack_modes: Array[Dictionary]`（每个 mode 含 type/armor_mult/hp_mult/base_pen/hit_modifier）。旧字段 deprecated 但保留 | 0.5 天 |
-| **A2** | DamageSystem.calculate_damage() 按 weapon-system.md § 6.1 完整重写 9 步流程：<br/>1. 命中检定<br/>2. 部位判定（头 25% / 身 75%）<br/>3. 暴击 roll<br/>4. base × 气力档位 × 精通 × 词条 × DG<br/>5. 加法叠加（头部 +0.5 / 暴击 +0.5）<br/>6. 攻击类型分配（armor_mult + weight × 渗透）<br/>7. 渗透 HP = damage × 基础率 × weight_modifier（暴击翻倍）<br/>8. 隐藏气力消耗 | 1.5 天 |
+| **A2** | DamageSystem 按 weapon-system.md § 6.1 九步流程：<br/>1~5 命中/部位/暴击/`final_damage`<br/>6~7 攻击类型（armor_mult + 加法倍率）<br/>8. **HP 分配**：透甲 HP = 实际扣甲 × 渗透率；击穿后 HP = (final − 实际扣甲) × hp_mult<br/>9. 隐藏气力消耗 | 1.5 天 |
 | **A3** | 暴击率公式落地：`5 + 武器 + 精通 + max(0, wisdom-40)*0.2`，软上限 50% | 0.5 天 |
 | **A4** | 单元测试：陌刀手 vs 重甲（Pierce 全力+头+暴击 一击斩 → 但本期没全力一击，先跑普攻）/ 跳荡 vs 中甲（普攻基线）期望与文档 § 6.4 对齐 | 1 天 |
 
@@ -124,7 +124,7 @@
 |---|---|---|
 | **D1** | BattleScene._spawn_units() 按 JobClass 生成 4v4：友方 4 职业各 1 / 敌方 4 单位（杂兵 ×3 + 1 精英带重甲 Body 200）| 0.5 天 |
 | **D2** | **单位面板增强**：显示职业名 + 武器类型 + base damage / weight / 实际渗透 + Wisdom / 暴击率 + **战斗预览面板**（鼠标悬停敌人时显示：命中率 / 期望伤害分解 base × 气力档 × 精通 × 词条）| 2 天 |
-| **D3** | **战斗日志 v2**：BBCode 多行结构化日志，呈现伤害公式各环节<br/>例：<br/>`陌刀手挥出陌刀（Slash 模式）`<br/>`命中率 75%（roll 42）→ 命中身体`<br/>`base 75 × 1.20（精通）× 1.00（满气力）× 1.05（利刃）= 94.5`<br/>`armor_mult 1.0 → Body -94.5（破甲）`<br/>`渗透 0.10 × 2.67（weight 14）= 0.267 → HP -25.2` | 2 天 |
+| **D3** | **战斗日志 v2**：BBCode 多行结构化日志，呈现伤害公式各环节<br/>例：<br/>`陌刀手挥出陌刀（Slash）→ 命中身体`<br/>`final 94.5 → 甲伤 -94.5（扣甲 94）`<br/>`透甲 94 × 26.7% = -25.1；未击穿 → HP -25` | 2 天 |
 | **D4** | **TopBar 升级**：Initiative 排序预览显示职业 icon + 当前气力档位（满/中/低/力竭）+ Wisdom 数值 | 1 天 |
 | **D5** | 验收：4 职业普攻在 demo 中体感差异化清晰 + 战斗日志可读性达标 | 0.5 天 |
 
@@ -173,7 +173,7 @@ Week 4：D4 + D5（TopBar 升级 + 验收）
 战斗 Demo 必须能复现以下场景，每项需在战斗日志 + UI 上可观察：
 
 - [ ] **跳荡盾防体感**：跳荡 + 团牌（base_block 25）正面被攻击，hit_chance 显著降低（30-40%）
-- [ ] **陌刀手 Slash 普攻人马俱碎**：陌刀 weight 14 → 渗透 0.267，普攻命中重甲 → Body -75 / HP -20
+- [ ] **陌刀手 Slash 普攻**：weight 14 → 渗透率 26.7%，打 Body 200 → 甲伤 -90 / 透甲 HP ≈ -24（未击穿无破甲后段）
 - [ ] **陌刀手 Pierce 普攻**：渗透 0.40，戳穿要害体感强
 - [ ] **不良人高频体感**：双匕首 AP 3，9 AP 一回合 3 次普攻，命中 3 次有 1 次暴击的概率高
 - [ ] **押衙破甲快**：单手锤 Crush armor_mult 1.5，普攻 1 击 Body -50（vs 跳荡 -42）

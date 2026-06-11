@@ -1,5 +1,7 @@
 extends Resource
 class_name Stats
+
+const _CombatModifier = preload("res://scripts/core/CombatModifier.gd")
 ##
 ## Stats.gd — 角色属性数据类
 ##
@@ -106,7 +108,7 @@ func is_alive() -> bool:
 	return hp > 0
 
 
-## 有效防御值（含递减 + block + dodge）
+## 有效防御值（含递减 + block + dodge + 气力惩罚）
 ## block_bonus：来自装备武器/盾牌的 block_value，由调用方传入
 ## dodge_bonus：运行时闪避加值，不受递减影响
 func effective_defense(block_bonus: int = 0) -> float:
@@ -116,8 +118,8 @@ func effective_defense(block_bonus: int = 0) -> float:
 		base = float(defense)
 	else:
 		base = 45.0 + float(defense - 45) * 0.5
-	# block 和 dodge 直接叠加，不受递减影响
-	return base + float(block_bonus) + float(dodge_bonus)
+	# block 和 dodge 直接叠加，不受递减影响；气力不足会降低防御稳定性
+	return max(0.0, base + float(block_bonus) + float(dodge_bonus) + get_defense_modifier())
 
 
 ## [DEPRECATED] 兼容旧调用，Phase 2 末删除
@@ -153,12 +155,12 @@ func eff_init(armor_weight: int = 0) -> int:
 	return max(1, v)
 
 
-## Effective Defense：defense × 装甲材质系数
+## Effective Defense：defense × 装甲材质系数 + 气力惩罚
 ##   armor_class："light" / "medium" / "heavy" / "none"
 ##   重甲 ×0.4 让重甲党 dodge / block 大幅降低，靠护甲池抗
 func eff_defense(armor_class: String = "light") -> float:
 	var mult: float = ARMOR_CLASS_DEF_MULT.get(armor_class, 1.0)
-	return float(defense) * mult
+	return max(0.0, float(defense) * mult + get_defense_modifier())
 
 
 ## 闪避率（%）：Init 和 Defense 共同决定（你的设计：协同效应）
@@ -192,19 +194,21 @@ func reset_ap() -> void:
 	ap = max_ap
 
 
-## 气力档位 → 命中率修正
-## 0-60%：无惩罚  60-80%：-5%  80-95%：-10%  95%+（力竭）：-20%
-func get_hit_modifier() -> float:
-	if max_stamina <= 0:
-		return -0.20
-	var ratio: float = float(fatigue) / float(max_stamina)
-	if ratio >= 0.95:
-		return -0.20   # 力竭
-	elif ratio >= 0.80:
-		return -0.10
-	elif ratio >= 0.60:
-		return -0.05
-	return 0.0
+## 仅 Stats 上下文可汇总的修正（气力档 debuff + 调用方附加项）；完整列表见 Unit.get_active_debuffs()
+func get_combat_modifiers(extra: Array = []) -> Array:
+	var mods: Array = [_CombatModifier.stamina_tier_for(self)]
+	mods.append_array(extra)
+	return mods
+
+
+## 汇总命中率修正（含气力档 debuff）
+func get_hit_modifier(extra: Array = []) -> float:
+	return _CombatModifier.sum_hit_pct(get_combat_modifiers(extra))
+
+
+## 汇总防御 flat 修正（含气力档 debuff）
+func get_defense_modifier(extra: Array = []) -> float:
+	return _CombatModifier.sum_defense_flat(get_combat_modifiers(extra))
 
 
 func recover_fatigue(amount: int = 15) -> void:

@@ -20,6 +20,8 @@ config/icon="res://icon.svg"
 
 WeaponArmorDB="*res://scripts/data/WeaponArmorDB.gd"
 JobDB="*res://scripts/core/JobDB.gd"
+CombatAudio="*res://scripts/audio/combat_audio.gd"
+CombatPalette="*res://scripts/ui/CombatPalette.gd"
 
 [display]
 

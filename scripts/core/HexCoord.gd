@@ -74,25 +74,63 @@ static func direction_index(from: Vector2i, to: Vector2i) -> int:
 	return -1
 
 
-## 取 axial 在某方向"对面"的那个格子（用于夹击判定）
-static func opposite_across(from_axial: Vector2i, target_axial: Vector2i) -> Vector2i:
-	var d_idx: int = direction_index(from_axial, target_axial)
-	if d_idx < 0:
-		var dq: int = target_axial.x - from_axial.x
-		var dr: int = target_axial.y - from_axial.y
-		var best: int = 0
-		var best_dot: float = -INF
-		var v := Vector2(float(dq), float(dr))
-		if v.length() > 0.0:
-			v = v.normalized()
-		for i in range(6):
-			var dv := Vector2(float(DIRECTIONS[i].x), float(DIRECTIONS[i].y)).normalized()
-			var d_dot: float = dv.dot(v)
-			if d_dot > best_dot:
-				best_dot = d_dot
-				best = i
-		return target_axial + DIRECTIONS[best]
-	return target_axial + DIRECTIONS[d_idx]
+## 主方向索引：相邻取精确值，否则取最接近的六方向（远程攻击 / 开局朝向）
+static func approx_direction(from_axial: Vector2i, to_axial: Vector2i) -> int:
+	var exact: int = direction_index(from_axial, to_axial)
+	if exact >= 0:
+		return exact
+	var dq: int = to_axial.x - from_axial.x
+	var dr: int = to_axial.y - from_axial.y
+	if dq == 0 and dr == 0:
+		return 0
+	var best: int = 0
+	var best_dot: float = -INF
+	var v := Vector2(float(dq), float(dr)).normalized()
+	for i in range(6):
+		var dv := Vector2(float(DIRECTIONS[i].x), float(DIRECTIONS[i].y)).normalized()
+		var d_dot: float = dv.dot(v)
+		if d_dot > best_dot:
+			best_dot = d_dot
+			best = i
+	return best
+
+
+## 取 target 上与 attacker 正对的相邻格（夹击时 B 应站的位置）
+static func opposite_across(attacker_axial: Vector2i, target_axial: Vector2i) -> Vector2i:
+	var toward_attacker: int = direction_index(target_axial, attacker_axial)
+	if toward_attacker >= 0:
+		return target_axial + DIRECTIONS[(toward_attacker + 3) % 6]
+	# 非相邻：取 target→attacker 主方向上的对侧邻格
+	var dq: int = attacker_axial.x - target_axial.x
+	var dr: int = attacker_axial.y - target_axial.y
+	var best: int = 0
+	var best_dot: float = -INF
+	var v := Vector2(float(dq), float(dr))
+	if v.length() > 0.0:
+		v = v.normalized()
+	for i in range(6):
+		var dv := Vector2(float(DIRECTIONS[i].x), float(DIRECTIONS[i].y)).normalized()
+		var d_dot: float = dv.dot(v)
+		if d_dot > best_dot:
+			best_dot = d_dot
+			best = i
+	return target_axial + DIRECTIONS[(best + 3) % 6]
+
+
+## 攻击者是否在目标正后方邻格（仅 1 格，不含左右侧翼）
+static func is_rear_hex(attacker_axial: Vector2i, target_axial: Vector2i, facing_dir: int) -> bool:
+	if distance(attacker_axial, target_axial) != 1:
+		return false
+	var dir_idx: int = direction_index(target_axial, attacker_axial)
+	return dir_idx >= 0 and dir_idx == (facing_dir + 3) % 6
+
+
+## 攻击者是否在目标正面邻格（面朝方向那一格）
+static func is_front_hex(attacker_axial: Vector2i, target_axial: Vector2i, facing_dir: int) -> bool:
+	if distance(attacker_axial, target_axial) != 1:
+		return false
+	var dir_idx: int = direction_index(target_axial, attacker_axial)
+	return dir_idx >= 0 and dir_idx == facing_dir % 6
 
 
 ## 单方向邻居

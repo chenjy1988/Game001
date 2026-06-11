@@ -142,7 +142,7 @@ func primary_mode() -> String:
 	return damage_type
 
 
-## 渗透 weight_modifier：实际渗透 = base_rate × (1 + max(0, (weight - 4) / 6))
+## 渗透 weight_modifier：破甲前透甲 HP = 实际扣甲 × (base_rate × weight_modifier)
 func weight_modifier() -> float:
 	return 1.0 + max(0.0, (float(weight) - 4.0) / 6.0)
 

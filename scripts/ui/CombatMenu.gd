@@ -5,15 +5,15 @@ class_name CombatMenu
 ##
 ## 布局：
 ##   ┌────────────────────────────────────────────────────────┐
-##   │ [头像] | [1斩][2刺][3瞄][4暴][5穿] | [P]详 [I]物 [Q]待 │
+##   │ [头像] | [P]详 [I]物 [Sp]待 [Q]结 | [1攻][2刺][3先][4息]… │
 ##   └────────────────────────────────────────────────────────┘
 ##                                                          ↑
 ##   按 P 切换：在操作栏上方弹出详情面板（HP/AP/头甲/身甲/气力/速度/装备）
 ##
 ## 设计要点：
 ## - 头像：当前操控单位的胸像（Unit.get_portrait_texture），切单位即换
-## - 数字键 1~9, 0 仅绑定攻击/技能（动态构建于 weapon + abilities）
-## - 固定字母键（不变位）：P=详情、I=道具、Q=等待
+## - 数字键 1~9, 0 = 技能槽（攻击模式 + 已学技能，按顺序填充）
+## - 固定字母键（不变位）：P=详情、I=道具、Space=等待、Q=结束回合
 ## - 详情默认隐藏；按 P 切换；不与 wsad/相机平移冲突
 ## - Esc：先关详情；详情已关时不消费让 BattleScene 接管
 ## - 信号 action_selected(action_id)：BattleScene 路由到具体行为
@@ -78,9 +78,9 @@ var _hud_row: Control = null               ## HUD 三层垂直容器（常驻）
 var _action_row: HBoxContainer = null      ## 平铺按钮容器（外层）
 var _portrait_rect: TextureRect = null     ## 当前单位头像
 var _portrait_name_label: Label = null     ## 头像下方姓名（备用，可省略）
-var _dynamic_row: HBoxContainer = null     ## 攻击/技能 chip 容器（中段，动态重建）
-var _preempt_btn: Button = null            ## 固定：先发制人 [E]（G5）
-var _wait_btn: Button = null               ## 固定：等待 [Q]
+var _dynamic_row: HBoxContainer = null     ## 技能槽 chip 容器（数字键 1~9，动态重建）
+var _wait_btn: Button = null               ## 固定：等待 [Space]
+var _end_turn_btn: Button = null           ## 固定：结束回合 [Q]
 var _item_btn: Button = null               ## 固定：道具 [I]
 var _detail_btn: Button = null             ## 固定：详情 [P]
 var _detail_panel: PanelContainer = null   ## 详情面板（默认隐藏）
@@ -178,50 +178,7 @@ func _build_action_bar_layout() -> void:
 	# 2) 分隔
 	_action_row.add_child(_make_vsep())
 
-	# 3) 固定字母 chip 区（先发制人 / 详情 / 道具 / 等待）
-	# G5：先发制人（技能 chip，蓝色边框）
-	_preempt_btn = _make_fixed_chip("先", "E", "", Color(0.30, 0.55, 0.85))
-	_preempt_btn.mouse_entered.connect(func():
-		if _current_unit and not _preempt_btn.disabled:
-			# 动态计算下大回合行动顺位
-			var order_text: String = ""
-			var battle_scene = get_node_or_null("/root/BattleScene")
-			if battle_scene and battle_scene.turn_manager:
-				var next_round_queue = battle_scene.turn_manager.get_next_round_queue()
-				var preview_entries = TurnScheduler.preview_with_preempt_bonus(next_round_queue, _current_unit, 40, 1)
-				var preview_round_1: Array[Unit] = []
-				for entry in preview_entries:
-					var entry_unit: Unit = null
-					if entry is Dictionary:
-						entry_unit = entry.get("unit")
-					elif "unit" in entry:
-						entry_unit = entry.unit
-					if entry_unit != null:
-						preview_round_1.append(entry_unit)
-				
-				var next_order_index = preview_round_1.find(_current_unit)
-				if next_order_index != -1:
-					order_text = "\n【先发制人预演】下回合将在第 %d 顺位行动" % (next_order_index + 1)
-			
-			# 还原原生 Hover 提示框并动态追加预测结果
-			_preempt_btn.tooltip_text = "先发制人：+40 Init（下回合），消耗 1 AP + 20 气力" + order_text
-			if battle_scene and battle_scene.has_method("set_log_hint"):
-				battle_scene.set_log_hint("先发制人：+40 Init（下回合），消耗 1 AP + 20 气力" + order_text)
-			
-			# 预演不要改动行动条（TopBar）的外显样式，故不发出预览信号给 TopBar
-			# ability_preview_requested.emit("preempt", _current_unit)
-	)
-	_preempt_btn.mouse_exited.connect(func():
-		var battle_scene = get_node_or_null("/root/BattleScene")
-		if battle_scene and battle_scene.has_method("set_log_hint"):
-			battle_scene.set_log_hint("左键：选中/移动/攻击  空格：结束回合  R：重开  ESC：取消\n滚轮：缩放  Cmd+0：复位  WASD/方向键：平移  中键拖拽：平移")
-		# ability_preview_cancelled.emit()
-	)
-	_preempt_btn.pressed.connect(func():
-		action_selected.emit("preempt")
-	)
-	_action_row.add_child(_preempt_btn)
-
+	# 3) 固定字母 chip 区（系统功能：详情 / 道具 / 等待）
 	_detail_btn = _make_fixed_chip("详", "P", "详情面板（切换显示）", Color(0.55, 0.55, 0.85))
 	_detail_btn.pressed.connect(_toggle_detail)
 	_action_row.add_child(_detail_btn)
@@ -231,9 +188,13 @@ func _build_action_bar_layout() -> void:
 	_item_btn.pressed.connect(func(): action_selected.emit("item_placeholder"))
 	_action_row.add_child(_item_btn)
 
-	_wait_btn = _make_fixed_chip("待", "Q", "等待 — 排到本回合队尾（不消耗 AP）", Color(0.85, 0.78, 0.30))
+	_wait_btn = _make_fixed_chip("待", "Sp", "等待 — 排到本回合队尾（不消耗 AP）", Color(0.85, 0.78, 0.30))
 	_wait_btn.pressed.connect(_invoke_wait)
 	_action_row.add_child(_wait_btn)
+
+	_end_turn_btn = _make_fixed_chip("结", "Q", "结束回合 — 放弃剩余 AP", Color(0.75, 0.35, 0.30))
+	_end_turn_btn.pressed.connect(_invoke_end_turn)
+	_action_row.add_child(_end_turn_btn)
 
 	# 4) 分隔
 	_action_row.add_child(_make_vsep())
@@ -426,24 +387,30 @@ func _rebuild_action_list() -> void:
 
 	var u: Unit = _current_unit
 	var ap: int = u.stats.ap if u.stats else 0
-	var weapon_ap: int = u.weapon.ap_cost if u.weapon else 999
+	var weapon_ap: int = u.get_weapon_ap_cost() if u.weapon else 999
 
-	# 1) 武器攻击模式（每个 mode 一个 chip）
+	# 1) 攻击：数字键 1 = 普通攻击；多模式武器 2+ = 其他攻击方式
 	if u.weapon != null:
 		var modes: Array = u.weapon.attack_modes if not u.weapon.attack_modes.is_empty() else [u.weapon.damage_type]
-		for mode in modes:
-			var short: String = MODE_LABEL.get(mode, mode.substr(0, 1))
+		for mi in range(modes.size()):
+			var mode: String = str(modes[mi])
 			var full: String = MODE_FULL.get(mode, mode)
+			var is_primary: bool = mi == 0
 			_action_list.append({
-				"id": "attack_" + str(mode),
-				"label": short,
-				"tooltip": "%s (%s) — AP %d" % [full, u.weapon.display_name, weapon_ap],
+				"id": "attack_" + mode,
+				"label": "攻" if is_primary else MODE_LABEL.get(mode, mode.substr(0, 1)),
+				"tooltip": ("普通攻击（%s）— %s，AP %d" if is_primary else "%s — %s，AP %d") % [
+					full, u.weapon.display_name, weapon_ap
+				],
 				"kind": KIND_ATTACK,
 				"locked": ap < weapon_ap,
 				"data": {"mode": mode},
 			})
 
-	# 2) 占位技能（Phase 2.5+ 接入 JobClass.abilities 后改）
+	# 2) 已学通用技能（Demo：全员默认学会；Phase 2.5 改由 JobClass.abilities 驱动）
+	_append_learned_skill_entries(u, ap)
+
+	# 3) 未学技能占位（Phase 2.5+）
 	_action_list.append({"id": "skill_aim_head",  "label": "瞄", "tooltip": "瞄头（Phase 2.5）",     "kind": KIND_SKILL, "locked": true, "data": {}})
 	_action_list.append({"id": "skill_all_out",   "label": "暴", "tooltip": "全力一击（Phase 2.5）", "kind": KIND_SKILL, "locked": true, "data": {}})
 	_action_list.append({"id": "skill_puncture",  "label": "穿", "tooltip": "穿心刺（Phase 2.5）",   "kind": KIND_SKILL, "locked": true, "data": {}})
@@ -456,8 +423,77 @@ func _rebuild_action_list() -> void:
 		else:
 			act["key"] = ""
 		var btn := _make_chip(act)
+		if act["id"] == "preempt":
+			_wire_preempt_hover(btn)
 		_dynamic_row.add_child(btn)
 		_action_buttons.append(btn)
+
+
+## 已学技能条目（按技能槽顺序插入攻击模式之后）
+func _append_learned_skill_entries(u: Unit, ap: int) -> void:
+	var preempt_locked: bool = true
+	if u.stats and ap >= 1:
+		var fatigue_cost: int = 20
+		if u.is_wearing_heavy_armor():
+			fatigue_cost = int(20 * 1.6)
+		preempt_locked = (u.stats.fatigue + fatigue_cost > u.stats.max_stamina)
+	_action_list.append({
+		"id": "preempt",
+		"label": "先",
+		"tooltip": "先发制人：下回合 Init +40，消耗 1 AP + 20 气力",
+		"kind": KIND_SKILL,
+		"locked": preempt_locked,
+		"data": {},
+	})
+	_action_list.append({
+		"id": "breath_regulation",
+		"label": "息",
+		"tooltip": "吐纳调息：9 AP，恢复至装备负重下限",
+		"kind": KIND_SKILL,
+		"locked": not u.can_use_breath_regulation(),
+		"data": {},
+	})
+
+
+func _timeline_units(entries: Array) -> Array[Unit]:
+	var result: Array[Unit] = []
+	for entry in entries:
+		var entry_unit: Unit = null
+		if entry is TimelineEntry:
+			entry_unit = entry.unit
+		elif entry is Dictionary:
+			entry_unit = entry.get("unit")
+		elif "unit" in entry:
+			entry_unit = entry.unit
+		if entry_unit != null:
+			result.append(entry_unit)
+	return result
+
+
+func _wire_preempt_hover(btn: Button) -> void:
+	btn.mouse_entered.connect(func():
+		if _current_unit == null or btn.disabled:
+			return
+		var order_text: String = ""
+		var battle_scene = get_node_or_null("/root/BattleScene")
+		if battle_scene and battle_scene.turn_manager:
+			var preview_entries = TurnScheduler.preview_with_preempt_bonus(
+				battle_scene.turn_manager.get_next_round_queue(), _current_unit, 40, 1)
+			var preview_round_1: Array[Unit] = _timeline_units(preview_entries)
+			var next_order_index: int = preview_round_1.find(_current_unit)
+			if next_order_index != -1:
+				order_text = "\n【先发制人预演】下回合将在第 %d 顺位行动" % (next_order_index + 1)
+		btn.tooltip_text = "先发制人：+40 Init（下回合），消耗 1 AP + 20 气力" + order_text
+		if battle_scene and battle_scene.has_method("set_log_hint"):
+			battle_scene.set_log_hint("先发制人：+40 Init（下回合），消耗 1 AP + 20 气力" + order_text)
+		ability_preview_requested.emit("preempt", _current_unit)
+	)
+	btn.mouse_exited.connect(func():
+		var battle_scene = get_node_or_null("/root/BattleScene")
+		if battle_scene and battle_scene.has_method("set_log_hint"):
+			battle_scene.set_log_hint(_default_log_hint())
+		ability_preview_cancelled.emit()
+	)
 
 
 func _refresh_action_states() -> void:
@@ -474,27 +510,28 @@ func _refresh_action_states() -> void:
 		var btn: Button = _action_buttons[i]
 		var locked: bool = act.get("locked", false)
 		if act["kind"] == KIND_ATTACK:
-			var weapon_ap: int = u.weapon.ap_cost if u.weapon else 999
+			var weapon_ap: int = u.get_weapon_ap_cost() if u.weapon else 999
 			locked = (ap < weapon_ap)
 			act["locked"] = locked
+		elif act["kind"] == KIND_SKILL:
+			match act["id"]:
+				"preempt":
+					var fatigue_cost: int = 20
+					if u.is_wearing_heavy_armor():
+						fatigue_cost = int(20 * 1.6)
+					locked = not u.stats or ap < 1 or (u.stats.fatigue + fatigue_cost > u.stats.max_stamina)
+				"breath_regulation":
+					locked = not u.can_use_breath_regulation()
+				_:
+					locked = act.get("locked", true)
+			act["locked"] = locked
 		btn.disabled = locked
-	# 固定按钮：先发制人（G5）
-	if _preempt_btn != null:
-		var can_preempt: bool = false
-		if u.stats and ap >= 1:
-			var fatigue_cost: int = 20
-			if u.is_wearing_heavy_armor():
-				fatigue_cost = int(20 * 1.6)
-			can_preempt = (u.stats.fatigue + fatigue_cost <= u.stats.max_stamina)
-		_preempt_btn.disabled = not can_preempt
-	# 固定按钮：等待（已等待过 → tooltip 改为"结束回合"）
 	if _wait_btn != null:
 		var can_wait: bool = _turn_manager != null and _turn_manager.has_method("can_wait") and _turn_manager.call("can_wait")
 		_wait_btn.disabled = not can_wait
-		if _turn_manager != null and _turn_manager.has_method("has_waited") and _current_unit and _turn_manager.call("has_waited", _current_unit):
-			_wait_btn.tooltip_text = "等待 — 结束回合（放弃剩余 AP）"
-		else:
-			_wait_btn.tooltip_text = "等待 — 排到本回合队尾（不消耗 AP）"
+		_wait_btn.tooltip_text = "等待 — 排到本回合队尾（不消耗 AP）"
+	if _end_turn_btn != null:
+		_end_turn_btn.disabled = false
 
 
 # ──────────── 详情面板 ────────────
@@ -530,7 +567,8 @@ func _refresh_unit_info() -> void:
 	if _current_unit.weapon != null:
 		var w: WeaponData = _current_unit.weapon
 		var modes: String = ",".join(w.attack_modes) if not w.attack_modes.is_empty() else w.damage_type
-		_weapon_label.text = "武器：%s (base %d / wt %d / %s / AP %d)" % [w.display_name, w.damage_base, w.weight, modes, w.ap_cost]
+		_weapon_label.text = "武器：%s (base %d / wt %d / %s / AP %d)" % [
+			w.display_name, w.damage_base, w.weight, modes, _current_unit.get_weapon_ap_cost()]
 	else:
 		_weapon_label.text = "武器：（无）"
 	if _current_unit.armor != null:
@@ -557,7 +595,6 @@ func _process(_delta: float) -> void:
 			_refresh_hud()
 			_refresh_unit_info()
 			_refresh_action_states()
-			_refresh_action_states()
 
 
 ## 固定到屏幕底部居中
@@ -578,14 +615,6 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	var ke: InputEventKey = event as InputEventKey
 
-	# 固定字母键
-	# E 键触发先发制人（直接执行，不只是预览）
-	if ke.keycode == KEY_E:
-		if not _preempt_btn.disabled:
-			action_selected.emit("preempt")
-		get_viewport().set_input_as_handled()
-		return
-
 	if ke.keycode == KEY_P:
 		_toggle_detail()
 		get_viewport().set_input_as_handled()
@@ -596,8 +625,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			action_selected.emit("item_placeholder")
 		get_viewport().set_input_as_handled()
 		return
-	if ke.keycode == KEY_Q:
+	if ke.keycode == KEY_SPACE:
 		_invoke_wait()
+		get_viewport().set_input_as_handled()
+		return
+	if ke.keycode == KEY_Q:
+		_invoke_end_turn()
 		get_viewport().set_input_as_handled()
 		return
 
@@ -636,6 +669,15 @@ func _invoke_action(idx: int) -> void:
 	action_selected.emit(act["id"])
 
 
+func clear_action_highlight() -> void:
+	for b in _action_buttons:
+		b.modulate = Color.WHITE
+
+
+func _default_log_hint() -> String:
+	return "左键：选中/移动/攻击  Q：结束回合  Space：等待  R：重开  ESC：暂停\n滚轮：缩放  Cmd+0：复位  WASD/方向键：平移  中键拖拽：平移"
+
+
 ## 等待：通过 action_selected 信号通知 BattleScene 处理（统一路由 + 日志输出）
 func _invoke_wait() -> void:
 	if _turn_manager == null:
@@ -648,6 +690,12 @@ func _invoke_wait() -> void:
 		return
 	action_selected.emit("wait")
 	_refresh_action_states()
+
+
+func _invoke_end_turn() -> void:
+	if _current_unit == null:
+		return
+	action_selected.emit("end_turn")
 
 
 ## 详情切换
@@ -697,6 +745,7 @@ func _make_chip(act: Dictionary) -> Button:
 	btn.add_theme_color_override("font_pressed_color", Color(1.0, 0.85, 0.30))
 	btn.add_theme_color_override("font_disabled_color", Color(0.45, 0.42, 0.38))
 	btn.focus_mode = Control.FOCUS_NONE
+	btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	btn.disabled = act.get("locked", false)
 	btn.tooltip_text = act.get("tooltip", "")
 	# kind 染色边框（视觉分组）
@@ -742,8 +791,8 @@ func _make_chip(act: Dictionary) -> Button:
 				return
 	)
 
-	# ──── G5 新增：Hover 信号（仅技能 chip 用于 TopBar 预演） ────
-	if act["kind"] == KIND_SKILL:
+	# 技能 Hover 预演（先发制人另有 _wire_preempt_hover）
+	if act["kind"] == KIND_SKILL and captured_id != "preempt" and captured_id != "breath_regulation":
 		btn.mouse_entered.connect(func():
 			if _current_unit and not btn.disabled:
 				ability_preview_requested.emit(captured_id, _current_unit)
@@ -766,6 +815,7 @@ func _make_fixed_chip(label: String, key: String, tooltip: String, border_color:
 	btn.add_theme_color_override("font_pressed_color", Color(1.0, 0.85, 0.30))
 	btn.add_theme_color_override("font_disabled_color", Color(0.45, 0.42, 0.38))
 	btn.focus_mode = Control.FOCUS_NONE
+	btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	btn.tooltip_text = tooltip
 
 	for state in ["normal", "hover", "pressed", "disabled"]:
@@ -794,6 +844,7 @@ func _make_fixed_chip(label: String, key: String, tooltip: String, border_color:
 		btn.add_theme_stylebox_override(state, ssb)
 
 	return btn
+
 
 
 ## 详情区（紧凑 BB 风）：

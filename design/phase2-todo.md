@@ -1,4 +1,4 @@
-# Phase 2 Todo 清单（v1.2 聚焦版）
+# Phase 2 Todo 清单（v1.4 聚焦版）
 
 > **配套文档**：[`phase2-plan.md`](phase2-plan.md) v1.2
 > **范围**：战斗系统重构 + 4 职业数据 + Ability 框架 + UI 升级（4 周）
@@ -11,6 +11,66 @@
 
 ---
 
+## 0. 开发周期全景（项目整体定位）
+
+### 0.1 SRPG 项目生命周期对照
+
+| 阶段 | 名称 | 核心目标 | 工业标准 | 本项目对应 |
+|---|---|---|---|---|
+| Pre-Production | 立项 / 设计 | 题材 + USP + 玩法骨架 + 数值蓝图 | 2-3 个月 | ✅ 已完成（`design.md` + `design/*` 共 10+ 篇基线） |
+| **Phase 1** | 战斗核心 MVP | 一个能动的战斗循环（hex + 单位 + 命中 + 伤害 + AI） | 1-2 个月 | ✅ 已完成 |
+| **Phase 2** | 战斗系统 v3.1 | 武器 / 职业 / Ability 框架 / 4v4 Demo / 战斗 UI | 4 周 | 🚧 **进行中**（MVP 可玩验证阶段） |
+| **Phase 2.5** | 能力专题 | 7 个职业能力 + 被动池 + 伤势系统 | 3-4 周 | ⏳ 未启动 |
+| **Phase 3** | 角色养成 | EXP / JP / 升级 / 转职树 / 词条 / 永久伤势 / 19 职业 | 2-3 个月 | ⏳ 未启动 |
+| **Phase 4** | 战略层 | 大地图 / 营地 / 招募 / 经济 / 任务 / Campaign | 3-4 个月 | ⏳ 未启动 |
+| Phase 5 | 内容生产 | 主线 12-15 章 + 支线 + 美术资源 + 配音 | 6-12 个月 | ⏳ 未启动 |
+| Phase 6 | Polish + QA | 平衡调优 / Bug / 多平台导出 / 本地化 | 2-3 个月 | ⏳ 未启动 |
+| Phase 7 | 发行 + DLC | EA → 1.0 → DLC 长尾 | 持续 | ⏳ 未启动 |
+
+### 0.2 当前定位
+
+**Phase 2（战斗系统重构 + UI 升级）的 Week 3-4**，核心战斗循环已通，当前目标为 **MVP 可玩性验证 Demo**。
+
+**已落地**：
+- ✅ A 段 DamageSystem v3.1（9 步管线 + Wisdom 暴击 + weight × 渗透，26/27 单测；T5 陌刀均值历史偏差待调）
+- ✅ E 段 行动调度（AP+回合制+Init 排序+等待，22 单测）
+- ✅ F 段 CombatMenu（DOS2 风扁平化 + HUD + 攻击模式对接）
+- ✅ B 段 4 职业数据（`jobs.json`：**跳荡/枪手/奇兵/斥候**，以 JSON 为准）
+- ✅ G 段 先发制人 + 行动条（仅 G7 文档补录待做）
+
+**Phase 2 期间额外 polish（原 todo 外）**：
+- ✅ 战场迷雾、战斗日志面板（展开/折叠 + 滚底）
+- ✅ TopBar 头像悬停 + 时间轴 hover
+- ✅ 程序化战斗音效（`CombatAudio` autoload）
+- ✅ 视觉色板（`CombatPalette`）+ 打击感抛光（HitEffect / 受击动画）
+- ✅ 夹击 v3 + 单位朝向（开战初始化 / 移动 / 攻击）+ `design.md` §九 同步
+- ✅ 无头测试 `tools/smoke.sh` / `run_tests.sh`
+- ✅ 4v4 对战仿真 `tools/run_sim.sh`（`BattleSimHarness` + `scenes/tools/BattleSim.tscn`）
+
+### 0.3 推进顺序（MVP 可玩验证路径，优先于全量 Phase 2）
+
+```
+Week A（可玩闭环）：
+  D1  4v4 标准阵容（jobs.json 四职 + 敌方精英重甲）
+  D2  SidePanel 武器数值 + UnitTooltip 命中预览（期望伤害搁置）
+  D4  TopBar 职业缩写 + 气力档位（icon 像素图后置）
+  手打 3 局 + 只调 JSON 数值
+
+Week B（Phase 2 收尾，试玩后再定）：
+  D3  战斗日志 v2（精简 toggle，非首日全文）
+  C1  Ability 框架（Phase 2.5 前补，非 MVP 阻塞）
+  D5  验收子集 + G7 文档
+```
+
+### 0.4 风险提示
+
+1. **职业名以 `jobs.json` 为准**：`phase2-plan` 旧名（陌刀手/不良人/押衙亲兵）仅作远期参考，验收清单已同步。
+2. **C1 非 MVP 阻塞**：普攻已通；Ability 框架在 Phase 2.5 加能力前落地即可。
+3. **D3 全文可分期**：MVP 阶段保证日志可读（夹击/围攻标签 + 滚底）即可，完整公式展开放到试玩反馈后。
+4. **期望伤害预览**：用户明确不要（波动大）；D2 验收只要求命中率 + 围攻提示。
+
+---
+
 ## A. DamageSystem 重构（Week 1）✅ 完成
 
 - [x] **A1** — `WeaponData.gd` 加新字段（`damage_base: int` / `weight: int` / `attack_modes: Array[String]` / `head_chance` / `two_handed` / `block_value`），data/weapons.json schema 已对齐；旧字段（damage_min/max/armor_effectiveness/armor_penetration）deprecated 但保留 1 个版本
@@ -20,9 +80,9 @@
   3. 暴击 roll
   4. base × 气力档位 × 精通 × 词条 × DG
   5. 加法叠加（头部 +0.5 / 暴击 +0.5）
-  6. 攻击类型分配（armor_mult + weight × 渗透）
-  7. 渗透 HP = damage × 基础率 × weight_modifier（暴击翻倍）
-  8. 隐藏气力消耗
+  6~7. 攻击类型（armor_mult）+ `final_damage` 加法倍率
+  8. HP 分配：透甲 = 实际扣甲 × 渗透率；击穿后 = (final − 实际扣甲) × hp_mult（见 weapon-system.md § 4.2.4）
+  9. 隐藏气力消耗
 - [x] **A3** — 暴击率公式落地：`5 + max(0, wisdom-40)*0.2`，软上限 50%
 - [x] **A4** — 单元测试 `scripts/tools/test_damage_system.gd`：陌刀手 vs 重甲（Slash 普攻）/ 跳荡 + 长矛 vs 中甲（Pierce 普攻）期望与文档 § 6.4 对齐，27 项 PASS
 
@@ -40,29 +100,28 @@
 
 ---
 
-## C. Ability 调度框架（Week 2 末）
+## C. Ability 调度框架（Week 2 末）— P1，MVP 不阻塞
 
 - [ ] **C1** — `scripts/core/abilities/Ability.gd` 基类（Resource）：id / display_name / ap_cost / stamina_cost_extra / weapon_filter / mutex_group / `apply(attacker, target) -> AttackResult`
   + `BasicAttack`（普攻）实现，作为基类的第一个具体能力
   + 4 职业普攻全部走 Ability.apply() 路径，数据驱动
 
 **Week 2 末 deliverable**：能力调度框架就绪，Phase 2.5 加能力时无需改战斗主流程。
+**MVP 说明**：当前 `Unit.attack_target()` 已满足可玩验证；C1 推迟到 Week B 或 Phase 2.5 启动前。
 
 ---
 
-## D. UI 升级 + 4v4 Demo（Week 3-4）⭐ 本期重点
+## D. UI 升级 + 4v4 Demo（Week 3-4）⭐ MVP 重点
 
-- [ ] **D1** — BattleScene._spawn_units() 按 JobClass 生成 4v4：
-  - 友方：4 职业各 1（跳荡 / 陌刀手 / 不良人 / 押衙亲兵）
-  - 敌方：4 单位（杂兵 ×3 + 1 精英带重甲 Body 200）
+- [x] **D1** — BattleScene._spawn_units() 4v4（以 `jobs.json` 为准）：
+  - 友方：跳荡 / 枪手 / 奇兵 / 斥候 各 1（`_create_unit_from_job`）
+  - 敌方：杂兵 ×3 + 1 精英重甲（`plate_armor`，Body≈280）
 
-- [ ] **D2** — **单位面板增强**（SidePanel.gd）：
-  - 显示职业名 + 武器类型 + base damage / weight / 实际渗透值
-  - 显示 Wisdom + 当前暴击率
-  - **战斗预览面板**：鼠标悬停敌人时显示
-    * 命中率（带 Overwhelm 修正）
-    * 期望伤害分解（base × 气力档 × 精通 × 词条）
-    * 期望 Body / HP 损失分配
+- [x] **D2** — **单位面板 + 战斗预览**（期望伤害项搁置）：
+  - [x] SidePanel：职业名 + Wisdom + 暴击率
+  - [x] SidePanel：武器 base / weight / 渗透率（主模式）
+  - [x] UnitTooltip：命中率 + 围攻加成（悬停敌人）
+  - [—] 期望伤害分解（**用户搁置**，不做）
 
 - [ ] **D3** — **战斗日志 v2**（BBCode 多行结构化）：
   ```
@@ -74,10 +133,11 @@
   ```
   - 默认精简版 + 可点开详细版（玩家可 toggle）
 
-- [ ] **D4** — **TopBar 升级**（TopBar.gd）：
-  - Initiative 排序预览显示职业 icon
-  - 当前气力档位指示（满 / 中 / 低 / 力竭）
-  - Wisdom 数值显示
+- [~] **D4** — **TopBar 升级**（TopBar.gd）：
+  - [x] 头像下职业缩写（文字 badge，像素 icon 后置）
+  - [x] 气力档位色条（满 / 中 / 低 / 力竭）
+  - [ ] Wisdom 数值（可合并进 hover tooltip）
+  - [ ] 职业像素 icon（`generating-dot-assets`，后置）
 
 - [ ] **D5** — 验收清单（见下文 § 验收）
 
@@ -210,15 +270,15 @@
 
 战斗 Demo 必须能复现以下场景，每项需在战斗日志 + UI 上可观察：
 
-- [ ] **跳荡盾防体感**：跳荡 + 团牌（base_block 25）正面被攻击，hit_chance 显著降低（30-40%）
-- [ ] **陌刀手 Slash 普攻人马俱碎**：陌刀 weight 14 → 渗透 0.267，普攻命中重甲 → Body -75 / HP -20
-- [ ] **陌刀手 Pierce 普攻**：渗透 0.40，戳穿要害体感强
-- [ ] **不良人高频体感**：双匕首 AP 3，9 AP 一回合 3 次普攻
-- [ ] **押衙破甲快**：单手锤 Crush armor_mult 1.5，普攻 1 击 Body -50（vs 跳荡 -42）
-- [ ] **战斗日志可读**：从 base 到 HP 的完整公式链路在日志中清晰呈现
-- [ ] **战斗预览**：鼠标悬停敌人时显示命中率 + 期望伤害（基础值，不含 buff/debuff）
-- [ ] **TopBar Initiative**：所有单位按 Init 排序，显示职业 icon + 气力档位
-- [ ] **Wisdom 暴击梯度**：陌刀手 Wisdom 30（暴击 +0）vs 不良人 Wisdom 60（暴击 +4）数值反映正确
+- [ ] **跳荡体感**：跳荡 + 横刀/中甲，正面承伤命中率体感偏低
+- [ ] **枪手长矛体感**：枪手 + 长矛，对中轻甲破甲/穿透可观察
+- [ ] **奇兵机动体感**：奇兵 Init 高 + 轻甲，绕侧/夹击站位有收益
+- [ ] **斥候 Wisdom 体感**：斥候 Wisdom 高 → 暴击率高于枪手/跳荡
+- [ ] **4v4 打完一场**：友 4 vs 敌 4（含重甲精英），10 分钟内可结束
+- [ ] **战斗日志可读**：命中/夹击/围攻/暴击标签清晰；最新行可见（v2 全文分期）
+- [x] **战斗预览**：悬停敌人显示命中率 + 围攻（不含期望伤害）
+- [~] **TopBar**：Init 排序 + 职业缩写 + 气力档位
+- [ ] **Wisdom 暴击梯度**：斥候（Wis 50+）vs 枪手（Wis 20+）暴击差可观察
 - [x] **等待机制可用**：选中单位按 Q 后挪到本回合队尾，行动顺序更新；每回合限 1 次，二次按下置灰
 - [x] **AP 不跨回合**：本回合剩余 AP > 0 时 end_turn，下回合开始 AP 重置 max_ap（不叠加）
 - [x] **战斗菜单数字键直触**：1~9 单键即可触发对应攻击/技能 chip，无需鼠标
@@ -231,21 +291,67 @@
 
 ## 进度速览
 
-| 阶段 | 任务数 | 已完成 | 进行中 | 待办 |
-|---|---|---|---|---|
-| A. DamageSystem 重构 | 4 | 4 | 0 | 0 |
-| B. 4 职业数据 | 3 | 3 | 0 | 0 |
-| C. Ability 框架 | 1 | 0 | 0 | 1 |
-| D. UI + Demo | 5 | 0 | 0 | 5 |
-| E. 行动调度重构 | 6 | 6 | 0 | 0 |
-| F. 战斗 UI（CombatMenu） | 5 | 5 | 0 | 0 |
-| G. 先发制人 + 行动条 | 7 | 6 | 0 | 1（仅 G7 文档） |
-| **总计** | **31** | **21** | **0** | **10** |
+| 阶段 | 任务数 | 已完成 | 进行中 | 待办 | 优先级 |
+|---|---|---|---|---|---|
+| A. DamageSystem 重构 | 4 | 4 | 0 | 0 | — |
+| B. 4 职业数据 | 3 | 3 | 0 | 0 | — |
+| C. Ability 框架 | 1 | 0 | 0 | 1 | P1 |
+| D. UI + Demo | 5 | 2 | 1 | 2 | **P0** |
+| E. 行动调度重构 | 6 | 6 | 0 | 0 | — |
+| F. 战斗 UI（CombatMenu） | 5 | 4 | 0 | 1（F4 道具 popup） | P2 |
+| G. 先发制人 + 行动条 | 7 | 6 | 0 | 1（仅 G7 文档） | P2 |
+| H. 外显 + 士气 + 状态 | 3 | 0 | 0 | 3 | P2.5 |
+| **总计** | **34** | **25** | **1** | **8** | — |
 
 **本期里程碑**：
-- ✅ Week 1：DamageSystem v3.1 + 行动调度（AP+回合制+等待）落地，49 项测试通过
-- ✅ Week 2 部分：CombatMenu 完成（DOS2 风扁平化 + HUD 中心对称 + 攻击模式对接）
-- 🚧 待办：4 职业 + Ability 框架 + 道具 popup + 4v4 demo
+- ✅ Week 1–2：DamageSystem + 调度 + CombatMenu + 4 职业
+- ✅ Week 3：先发制人 + 行动条 + 音效/色板/夹击/朝向 polish
+- 🚧 **MVP 周**：D1 4v4 + D2/D4 补全 → 手打试玩 → JSON 调参
+- ⏳ Week B：D3 日志 v2 + C1 + D5 全量验收
+
+**剩余任务路径图**：
+
+```
+P0 MVP（可玩验证）：
+  D1 → D2 补全 → D4 气力档 → 手打试玩
+
+P1 Phase 2 收尾：
+  D3 日志 v2 → C1 Ability → D5 验收 → G7 文档
+
+P2 后置：
+  F4 道具 popup · TopBar 像素 icon · generating-dot-assets
+
+P2.5 战斗表现 + 状态系统（新增）：
+  H1 头顶血条/甲量外显 → H2 士气设计+外显 → H3 Buff/Debuff 框架
+```
+
+---
+
+## H. 单位外显 + 士气 + 状态效果（Phase 2.5 起）— P2
+
+> **设计基线**：[`status-effects.md`](status-effects.md)（Buff 8 / Debuff 14+气力三档 / 士气 **5 档** / 临时伤势）· `design.md` §十一
+
+- [ ] **H1** — **头顶血条 + 甲量外显**（World Space，单位模型上方）：
+  - HP 条（现有 `Unit._draw` 细条增强或拆为独立 `UnitOverheadBar` 节点）
+  - 头甲 / 身甲条或合并甲条（薄条叠在 HP 下方；数值变化时 tween）
+  - 仅可见单位显示（战争迷雾：未探索格隐藏或灰化）
+  - 与底部 HUD / SidePanel 数据同源，不重复维护两套 Stats
+
+- [ ] **H2** — **士气外显 + 士气系统设计**：
+  - 设计 SoT：补齐 `Stats.morale_tier`（振奋 / 稳定 / 动摇 / **惊惧** / 崩溃）与 Resolve 检定流程（见 status-effects.md §三；防御修正为 **%**）
+  - 触发器 MVP：友军死亡波及、HP&lt;25%、杀敌升级（至少 3 条可手打验证）
+  - UI：头顶 icon 或色标 + CombatMenu/Tooltip 档位文字；与 H1 外显层共用挂载点
+  - 战斗日志：士气变化一行 BBCode（`【动摇】张三 士气下降`）
+
+- [ ] **H3** — **Buff / Debuff 开发**：
+  - `CombatModifier.gd`（或 `StatusEffect.gd` Resource）+ `Unit.get_active_debuffs()` / `apply_modifier()`
+  - 首期落地：气力三档、手拙、动摇/惊惧/崩溃（依赖 H2）、眩晕/缴械/迟缓（限时 `turns_remaining`）
+  - 战斗修正接入 `DamageSystem` / `calculate_hit_chance` / Init 排序（与文档表一致）
+  - UI：单位头顶或侧边状态 icon 列表（最多显示 4 个 + 溢出 `+N`）；悬停 Tooltip 展开全文
+
+**H 阶段 deliverable**：战场上能一眼读到 HP/甲/士气/关键 debuff；士气与状态修正进入伤害/命中管线。
+
+**依赖**：H2 → H3（士气 debuff 外显）；H1 可与 H2 并行。
 
 ---
 
@@ -262,9 +368,30 @@
 ▢ 临时伤势触发系统
 ```
 
+预估 3-4 周。**前置条件**：C1 Ability 框架必须先落地，否则每个能力都要改 `Unit.attack_target()`，4 个能力后失控。
+
 ---
 
-**文档版本**：v1.3
-**创建时间**：2026-06-05（v1.0）/ 2026-06-06 加入 E 段行动调度重构（v1.1）/ 2026-06-06 加入 F 段战斗 UI（v1.2）/ 2026-06-06 A+E 完成 / F 部分完成 / F 切换为 DOS2 平铺设计（v1.3）
-**配套**：[`phase2-plan.md`](phase2-plan.md) v1.2 + [`combat-ui.md`](combat-ui.md)
-**IDE Todo 同步**：保持 24 项一致
+## Phase 3 起步预告（远期）
+
+完成 Phase 2 + Phase 2.5 后进入：
+
+```
+▢ 角色背景 + 1-3 星天赋
+▢ 升级加点 + 软上限
+▢ EXP / JP 系统
+▢ 19 职业全量铺开（当前 4 职业 → 19 职业）
+▢ 转职树
+▢ 武器/护甲词条系统
+▢ 永久伤势（HP=0 → 重伤判定）
+▢ 道士 / 僧兵 / 方士战兵 Wisdom 系职业能力
+```
+
+预估 2-3 个月。
+
+---
+
+**文档版本**：v1.6
+**创建时间**：2026-06-05（v1.0）/ 2026-06-06 加入 E 段行动调度重构（v1.1）/ 2026-06-06 加入 F 段战斗 UI（v1.2）/ 2026-06-06 A+E 完成 / F 部分完成 / F 切换为 DOS2 平铺设计（v1.3）/ 2026-06-11 开发周期全景（v1.4）/ 2026-06-11 MVP 路径 + jobs.json 对齐 + polish 补录 + 验收清单同步（v1.5）/ 2026-06-11 H 段：头顶外显 + 士气 + Buff/Debuff（v1.6）
+**配套**：[`phase2-plan.md`](phase2-plan.md) v1.2 + [`combat-ui.md`](combat-ui.md) + [`status-effects.md`](status-effects.md)
+**IDE Todo 同步**：保持与 H1–H3 三项一致

@@ -74,4 +74,14 @@ func _test_opposite_across() -> void:
 	target = Vector2i(0, 0)
 	opp = HexCoord.opposite_across(from, target)
 	print("from=(2,0) target=(0,0) → opposite=", opp, "  （远程近似，期望 ~(-1,0)）")
-	print("✅ opposite_across 测试通过")
+	assert(opp == Vector2i(-1, 0), "远程对侧格错误")
+
+	# 侧翼不算背后：目标面朝西(3)时，东侧为背后弧，西/南侧为正面或侧翼
+	var center := Vector2i(0, 0)
+	var facing_west := 3
+	assert(not HexCoord.is_rear_hex(Vector2i(-1, 0), center, facing_west), "正面格不应算背后")
+	assert(not HexCoord.is_rear_hex(Vector2i(0, 1), center, facing_west), "侧翼格不应算背后")
+	assert(HexCoord.is_rear_hex(Vector2i(1, 0), center, facing_west), "背后格应算背后")
+	assert(HexCoord.is_front_hex(Vector2i(-1, 0), center, facing_west), "正面格应算正面")
+	assert(not HexCoord.is_front_hex(Vector2i(1, 0), center, facing_west), "背后格不算正面")
+	print("✅ opposite_across / is_rear_hex / is_front_hex 测试通过")

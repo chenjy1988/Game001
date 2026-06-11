@@ -7,20 +7,44 @@ extends PanelContainer
 # 内部 PortraitItem 类：具有敌友战术边框的单位头像 + 向上箭头指示
 # ─────────────────────────────────────────────────────────────
 class PortraitItem extends Control:
+	const SIZE_NORMAL := Vector2(48, 54)
+	const SIZE_ACTIVE := Vector2(58, 68)
+
 	var unit: Unit = null
 	var border_rect: ColorRect = null
 	var portrait_rect: TextureRect = null
 	var arrow_label: Label = null
+	var job_label: Label = null
+	var fatigue_bar: ColorRect = null
+	var _is_active_turn: bool = false
+
+	static func _fatigue_tier_color(u: Unit) -> Color:
+		if u == null or u.stats == null:
+			return Color(0.5, 0.5, 0.5)
+		var vigor: float = 1.0 - u.get_fatigue_ratio()
+		if vigor >= 0.75:
+			return Color(0.35, 0.85, 0.45)
+		if vigor >= 0.50:
+			return Color(0.85, 0.78, 0.30)
+		if vigor >= 0.25:
+			return Color(0.90, 0.55, 0.25)
+		return Color(0.85, 0.30, 0.28)
+
+	static func _job_badge_text(u: Unit) -> String:
+		if u == null or u.job == null:
+			return ""
+		var n: String = u.job.display_name
+		return n.substr(0, mini(2, n.length()))
 
 	func _init(u: Unit) -> void:
 		unit = u
-		custom_minimum_size = Vector2(48, 48)
+		custom_minimum_size = SIZE_NORMAL
 		mouse_filter = MOUSE_FILTER_STOP
 
 		# 1. 敌友区分边框（取代直接对头像染色，保持头像色彩纯正）
 		# 友方采用清澈的战术蓝，敌方采用醒目的战术红
 		border_rect = ColorRect.new()
-		border_rect.color = Color(0.15, 0.55, 0.85) if u.get_faction() == 0 else Color(0.8, 0.15, 0.15)
+		border_rect.color = CombatPalette.ally if u.get_faction() == 0 else CombatPalette.enemy
 		border_rect.anchor_right = 1.0
 		border_rect.anchor_bottom = 1.0
 		border_rect.offset_left = 0
@@ -51,7 +75,7 @@ class PortraitItem extends Control:
 		arrow_label = Label.new()
 		arrow_label.text = "↑"
 		arrow_label.add_theme_font_size_override("font_size", 12)
-		arrow_label.add_theme_color_override("font_color", Color(0.2, 0.8, 0.2))  # 绿色
+		arrow_label.add_theme_color_override("font_color", CombatPalette.turn_boost)
 		arrow_label.anchor_left = 0.5
 		arrow_label.anchor_top = 1.0
 		arrow_label.offset_left = -16
@@ -59,19 +83,54 @@ class PortraitItem extends Control:
 		arrow_label.visible = false
 		add_child(arrow_label)
 
+		# 4) 友方职业缩写（左上）
+		var badge := _job_badge_text(u)
+		if badge != "":
+			job_label = Label.new()
+			job_label.text = badge
+			job_label.add_theme_font_size_override("font_size", 8)
+			job_label.add_theme_color_override("font_color", Color(0.95, 0.92, 0.85))
+			job_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+			job_label.add_theme_constant_override("outline_size", 2)
+			job_label.offset_left = 3
+			job_label.offset_top = 1
+			add_child(job_label)
+
+		# 5) 气力档位色条（底边 3px）
+		fatigue_bar = ColorRect.new()
+		fatigue_bar.color = _fatigue_tier_color(u)
+		fatigue_bar.anchor_top = 1.0
+		fatigue_bar.anchor_right = 1.0
+		fatigue_bar.anchor_bottom = 1.0
+		fatigue_bar.offset_top = -3
+		fatigue_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(fatigue_bar)
+
+	func _default_border_color() -> Color:
+		return CombatPalette.ally if unit.get_faction() == 0 else CombatPalette.enemy
+
+	func set_active_turn(active: bool) -> void:
+		_is_active_turn = active
+		custom_minimum_size = SIZE_ACTIVE if active else SIZE_NORMAL
+		if border_rect:
+			border_rect.color = CombatPalette.accent_gold if active else _default_border_color()
+		if portrait_rect:
+			portrait_rect.modulate = Color(1.08, 1.05, 0.92) if active else Color.WHITE
+		if job_label:
+			job_label.add_theme_font_size_override("font_size", 9 if active else 8)
+
 	func show_arrow() -> void:
 		if arrow_label:
 			arrow_label.text = "↑"
 			arrow_label.visible = true
-		if border_rect:
-			# 悬停时边框高亮发光
-			border_rect.color = Color(0.4, 0.8, 1.0) if unit.get_faction() == 0 else Color(1.0, 0.4, 0.4)
+		if border_rect and not _is_active_turn:
+			border_rect.color = CombatPalette.ally_bright if unit.get_faction() == 0 else CombatPalette.enemy_bright
 
 	func hide_arrow() -> void:
 		if arrow_label:
 			arrow_label.visible = false
 		if border_rect:
-			border_rect.color = Color(0.15, 0.55, 0.85) if unit.get_faction() == 0 else Color(0.8, 0.15, 0.15)
+			border_rect.color = CombatPalette.accent_gold if _is_active_turn else _default_border_color()
 
 	func show_boost() -> void:
 		if arrow_label:
@@ -79,7 +138,7 @@ class PortraitItem extends Control:
 			arrow_label.text = "↑"
 			arrow_label.visible = true
 		if border_rect:
-			border_rect.color = Color(0.2, 0.9, 0.2)  # 超车绿色边框
+			border_rect.color = CombatPalette.turn_boost
 
 
 @onready var round_label: Label = $HBox/RoundLabel
@@ -90,10 +149,12 @@ var _current_unit: Unit = null
 var _current_round_0: Array[Unit] = []
 var _current_round_1: Array[Unit] = []
 var _is_preview_mode: bool = false
+var _saved_round_1: Array[Unit] = []       ## 先发预演前备份，mouse exit 时恢复
 var _portrait_items: Array = []  ## 保留当前渲染的所有 PortraitItem 引用
 
 var _display_offset: int = 0
 const MAX_VISIBLE_PORTRAITS: int = 12  ## 调高上限（一屏可容纳 12 人），保证下大回合的队列能完整展现，同时维持单行极简
+const PORTRAIT_ROW_H: int = PortraitItem.SIZE_ACTIVE.y
 
 
 func set_current_unit(unit: Unit, round_num: int, round_0_order: Array[Unit], round_1_order: Array[Unit]) -> void:
@@ -101,8 +162,9 @@ func set_current_unit(unit: Unit, round_num: int, round_0_order: Array[Unit], ro
 	_current_round_0 = round_0_order
 	_current_round_1 = round_1_order
 	_is_preview_mode = false
-	_display_offset = 0  ## 轮到新单位时，自动重置偏移到最前
-	
+	_saved_round_1.clear()
+	_display_offset = 0  ## 当前行动单位固定为行动条首位
+
 	round_label.text = "回合 %d" % round_num
 	_build_portrait_containers()
 
@@ -148,23 +210,37 @@ func _build_portrait_containers() -> void:
 		# 检查是否到了下大回合的边界，插入金黄色竖线分割（|）
 		if absolute_index == full_timeline.size() and i > 0:
 			var separator := ColorRect.new()
-			separator.custom_minimum_size = Vector2(4, 48)
-			separator.color = Color(0.85, 0.69, 0.22)  # 金黄色
+			separator.custom_minimum_size = Vector2(4, PORTRAIT_ROW_H)
+			separator.color = CombatPalette.round_divider
 			header_portrait_container.add_child(separator)
-			
+
 		var u: Unit = visible_batch[i]
 		var item = PortraitItem.new(u)
+		if u == _current_unit and absolute_index == 0:
+			item.set_active_turn(true)
 		header_portrait_container.add_child(item)
 		_portrait_items.append(item)
-		
-		# 先发制人超车预览标记
-		if _is_preview_mode and u == _current_unit:
-			# 只有当下大回合的预览位置被渲染时才标记
-			if absolute_index >= full_timeline.size():
-				item.show_boost()
+
+		_mark_next_round_slot(item, u, absolute_index, full_timeline.size())
+
+
+## 下大回合顺位标记：玩家回合常驻 / 先发制人 hover 预演
+func _mark_next_round_slot(item: PortraitItem, u: Unit, absolute_index: int, next_round_start: int) -> void:
+	if absolute_index < next_round_start:
+		return
+	if _current_unit == null or u != _current_unit:
+		return
+	if _is_preview_mode:
+		item.show_boost()
+	elif _current_unit.get_faction() == 0:
+		item.show_boost()
 
 
 func _ready() -> void:
+	custom_minimum_size.y = PORTRAIT_ROW_H + 6
+	if header_portrait_container:
+		header_portrait_container.alignment = BoxContainer.ALIGNMENT_END
+
 	# 绑定右键翻页按钮
 	if page_button:
 		page_button.pressed.connect(_on_page_pressed)
@@ -213,26 +289,23 @@ func _on_ability_preview_requested(ability_id: String, unit: Unit) -> void:
 	if ability_id != "preempt" or unit == null or _current_round_0.size() == 0:
 		return
 
-	_is_preview_mode = true
-	
-	var preview_round_0 = _current_round_0.duplicate()
+	_saved_round_1 = _current_round_1.duplicate()
 	var preview_entries = TurnScheduler.preview_with_preempt_bonus(_current_round_1, unit, 40, 1)
 	var preview_round_1: Array[Unit] = []
 	for entry in preview_entries:
 		var entry_unit: Unit = null
-		if entry is Dictionary:
+		if entry is TimelineEntry:
+			entry_unit = entry.unit
+		elif entry is Dictionary:
 			entry_unit = entry.get("unit")
 		elif "unit" in entry:
 			entry_unit = entry.unit
-			
 		if entry_unit != null:
 			preview_round_1.append(entry_unit)
-
-	if preview_round_1.size() == 0:
+	if preview_round_1.is_empty():
 		preview_round_1 = _current_round_1.duplicate()
 
 	_is_preview_mode = true
-	_current_round_0 = preview_round_0
 	_current_round_1 = preview_round_1
 	_build_portrait_containers()
 
@@ -242,4 +315,7 @@ func _on_ability_preview_cancelled() -> void:
 	if not _is_preview_mode:
 		return
 	_is_preview_mode = false
+	if not _saved_round_1.is_empty():
+		_current_round_1 = _saved_round_1.duplicate()
+		_saved_round_1.clear()
 	_build_portrait_containers()

@@ -9,7 +9,7 @@ extends SceneTree
 ##   T1. weight_modifier 公式：1 + max(0, (weight-4)/6)
 ##   T2. ARMOR_MULT / HP_MULT / BASE_PEN 表查询正确
 ##   T3. 暴击率公式：5 + max(0, wisdom-40)*0.2，软上限 50%
-##   T4. 气力档位系数：>50% 满 / 力竭 0.5
+##   T4. 气力档位系数：>50% 满 / 20-50% 中疲劳 / 0-20% 低气力
 ##   T5. 多次 execute_attack 跑陌刀手 vs 重甲（Slash 普攻）期望 base_damage ≈ 文档 § 6.4
 ##   T6. 多次 execute_attack 跑跳荡 + 长矛 vs 中甲（Pierce 普攻）期望伤害符合
 ##
@@ -107,7 +107,6 @@ func _t2_lookup_tables() -> void:
 	_expect(DamageSystem.BASE_PEN_BY_TYPE["slash"] == 0.10, "Slash base_pen = 0.10")
 	_expect(DamageSystem.BASE_PEN_BY_TYPE["pierce"] == 0.15, "Pierce base_pen = 0.15")
 	_expect(DamageSystem.BASE_PEN_BY_TYPE["crush"] == 0.08, "Crush base_pen = 0.08")
-	_expect(DamageSystem.CRIT_PEN_MULT == 2.0, "暴击渗透翻倍系数 = 2.0")
 
 
 func _t3_crit_chance() -> void:
@@ -142,13 +141,26 @@ func _t4_stamina_tier() -> void:
 	s.fatigue = 0   # 满气力（剩余 100%）
 	_expect(DamageSystem.stamina_tier_multiplier(s) == 1.0, "满气力 → 1.0")
 	s.fatigue = 100   # 力竭
-	_expect(DamageSystem.stamina_tier_multiplier(s) == 0.5, "力竭 → 0.5")
-	s.fatigue = 60    # 剩 40%（中度疲劳，0.85~0.95）
+	var exhausted := DamageSystem.stamina_tier_multiplier(s)
+	_expect(exhausted >= 0.70 and exhausted <= 0.80, "力竭 ∈ [0.70,0.80]，实际 %.3f" % exhausted)
+	s.fatigue = 60    # 剩 40%（中度疲劳，0.80~0.90）
 	var mid := DamageSystem.stamina_tier_multiplier(s)
-	_expect(mid >= 0.85 and mid <= 0.95, "中度疲劳 ∈ [0.85,0.95]，实际 %.3f" % mid)
-	s.fatigue = 90    # 剩 10%（重度疲劳，0.65~0.85）
+	_expect(mid >= 0.80 and mid <= 0.90, "中度疲劳 ∈ [0.80,0.90]，实际 %.3f" % mid)
+	s.fatigue = 90    # 剩 10%（低气力，0.70~0.80）
 	var low := DamageSystem.stamina_tier_multiplier(s)
-	_expect(low >= 0.65 and low <= 0.85, "重度疲劳 ∈ [0.65,0.85]，实际 %.3f" % low)
+	_expect(low >= 0.70 and low <= 0.80, "低气力 ∈ [0.70,0.80]，实际 %.3f" % low)
+	s.fatigue = 0
+	_expect(_approx(s.get_hit_modifier(), 0.0), "满气力命中修正 = 0")
+	_expect(_approx(s.get_defense_modifier(), 0.0), "满气力防御修正 = 0")
+	s.fatigue = 60
+	_expect(_approx(s.get_hit_modifier(), -0.05), "剩余 40% 气力命中修正 = -5%")
+	_expect(_approx(s.get_defense_modifier(), -5.0), "剩余 40% 气力防御修正 = -5")
+	s.fatigue = 90
+	_expect(_approx(s.get_hit_modifier(), -0.10), "剩余 10% 气力命中修正 = -10%")
+	_expect(_approx(s.get_defense_modifier(), -10.0), "剩余 10% 气力防御修正 = -10")
+	s.fatigue = 100
+	_expect(_approx(s.get_hit_modifier(), -0.10), "力竭命中修正 = -10%")
+	_expect(_approx(s.get_defense_modifier(), -10.0), "力竭防御修正 = -10")
 
 
 ## 模拟"陌刀手 + 陌刀（Slash）打重甲"期望 base 在文档 § 6.4 范围
@@ -220,13 +232,17 @@ func _t6_javelin_vs_mid_armor() -> void:
 	# 长矛 weight 12 → mod = 1 + (12-4)/6 = 2.333
 	_expect(_approx(atk.weapon.weight_modifier(), 2.333, 0.01),
 		"长矛 weight_modifier=2.333，实际 %.3f" % atk.weapon.weight_modifier())
-	# Pierce 普攻：base_pen 0.15 × 2.333 = 0.35
+	# Pierce 普攻：pen_rate = 0.15 × 2.333 = 0.35；透甲 HP = 甲伤 × pen_rate
 	var demo: Dictionary = DamageSystem.execute_attack(atk, dst, {"mode": "pierce"})
 	if demo.get("hit", false) and not demo.get("blocked", false):
-		# 暴击下 pen_rate 翻倍；非暴击下应 ≈ 0.35
 		if not demo.get("critical", false):
 			_expect(_approx(float(demo.get("penetration_rate", 0)), 0.35, 0.01),
 				"Pierce 普攻 pen_rate=0.35，实际 %.3f" % float(demo.get("penetration_rate", 0)))
+			var armor_dmg: float = float(demo.get("armor_damage", 0))
+			var pen_hp: float = float(demo.get("penetration_hp", 0))
+			if armor_dmg > 0 and demo.get("armor_state") != "broken":
+				_expect(_approx(pen_hp / armor_dmg, 0.35, 0.02),
+					"未击穿：透甲 HP = 实际扣甲×35%%，实际 pen/扣甲=%.3f" % (pen_hp / armor_dmg))
 	# armor_mult / hp_mult 验证
 	_expect(_approx(float(demo.get("armor_mult", 0)), 0.7),
 		"Pierce armor_mult=0.7，实际 %.3f" % float(demo.get("armor_mult", 0)))

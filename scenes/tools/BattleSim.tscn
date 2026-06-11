@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://battle_sim_headless"]
+
+[ext_resource type="Script" path="res://scripts/tools/battle_sim_scene.gd" id="1"]
+
+[node name="BattleSim" type="Node"]
+script = ExtResource("1")

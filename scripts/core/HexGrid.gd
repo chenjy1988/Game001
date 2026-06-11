@@ -7,6 +7,7 @@ class_name HexGrid
 const HEX_SIZE: float = 36.0  ## 六边形外接圆半径
 
 @export var map_radius: int = 6  ## 地图半径（hex 个数，圆形地图）
+@export var skip_obstacle_generation: bool = false  ## 仿真/调试：跳过随机障碍，保证出生区连通
 
 # ─── 地形纹理 ───
 const _TILE_DIR: String = "res://assets/terrain/ai/"
@@ -51,7 +52,8 @@ func set_elevation(axial: Vector2i, level: int) -> void:
 
 # 高亮缓存（用于 _draw）
 var _highlight_move: Array[Vector2i] = []
-var _highlight_attack: Array[Vector2i] = []
+var _highlight_attack_markers: Array[Vector2i] = [] ## 射程内非敌方格（小灰标）
+var _highlight_attack_enemy: Array[Vector2i] = []   ## 射程内可攻击敌方格（小红标）
 var _highlight_path: Array[Vector2i] = []
 var _highlight_zoc: Array[Vector2i] = []  ## 敌方控制区（弱橙叠加）
 var _highlight_oa_steps: Array[Vector2i] = []  ## 路径中会触发借机攻击的格子
@@ -70,7 +72,8 @@ func _ready() -> void:
 	_terrain_noise.frequency = 0.025
 	_terrain_noise.fractal_octaves = 2
 	_generate_map()
-	_generate_obstacles()   # 随机障碍（含连通性验证）
+	if not skip_obstacle_generation:
+		_generate_obstacles()   # 随机障碍（含连通性验证）
 	_build_astar()
 	_load_terrain_textures()
 	_assign_hex_tiles()
@@ -218,16 +221,14 @@ func _generate_obstacles() -> void:
 	noise.frequency = 0.35
 	noise.fractal_octaves = 2
 
-	# 出生保护带：左侧 q <= spawn_guard 为友方区，右侧 q >= -spawn_guard 为敌方区
-	var spawn_guard: int = -(map_radius - 2)    # 例：radius=6 → q<=-4 保护
-
 	var candidates: Array[Vector2i] = []
 	for axial in _hexes.keys():
 		# 中央核心保护（半径 2 内不放障碍）
 		if HexCoord.distance(axial, Vector2i.ZERO) <= 2:
 			continue
-		# 双方出生带保护
-		if axial.x <= spawn_guard or axial.x >= -spawn_guard:
+		# 双方出生带保护（按地图半径推算左右对峙区，避免出生点被随机障碍占用）
+		var spawn_margin: int = max(3, map_radius - 6)
+		if axial.x <= -spawn_margin or axial.x >= spawn_margin:
 			continue
 		var v: float = noise.get_noise_2d(float(axial.x), float(axial.y))
 		if v > 0.38:       # ~12% 概率成为障碍
@@ -308,11 +309,45 @@ func is_in_map(axial: Vector2i) -> bool:
 	return _hexes.has(axial)
 
 
+func is_obstacle(axial: Vector2i) -> bool:
+	return _obstacles.has(axial)
+
+
+## 寻找距 preferred 最近的可站立格（可走且未被占用）；找不到则返回 preferred。
+func find_nearest_standable(preferred: Vector2i, exclude_occupied: bool = true) -> Vector2i:
+	if _is_standable(preferred, exclude_occupied):
+		return preferred
+	var visited: Dictionary = {preferred: true}
+	var queue: Array = [preferred]
+	while not queue.is_empty():
+		var cur: Vector2i = queue.pop_front()
+		for n in HexCoord.neighbors(cur):
+			if visited.has(n):
+				continue
+			visited[n] = true
+			if _is_standable(n, exclude_occupied):
+				return n
+			queue.append(n)
+	push_warning("[HexGrid] 找不到可站立格，保留原坐标 %s" % preferred)
+	return preferred
+
+
+func _is_standable(axial: Vector2i, exclude_occupied: bool) -> bool:
+	if not _hexes.has(axial):
+		return false
+	if exclude_occupied and _occupants.has(axial):
+		return false
+	return true
+
+
 func get_occupant(axial: Vector2i):
 	return _occupants.get(axial, null)
 
 
 func set_occupant(axial: Vector2i, unit) -> void:
+	if unit != null and not _hexes.has(axial):
+		push_warning("[HexGrid] 拒绝在非可走格放置单位: %s" % axial)
+		return
 	if unit == null:
 		_occupants.erase(axial)
 	else:
@@ -383,7 +418,9 @@ func find_path(from_axial: Vector2i, to_axial: Vector2i, ignore_occupant_at: Vec
 				_astar.set_point_disabled(eid, true)
 
 	var id_path: PackedInt64Array = _astar.get_id_path(from_id, to_id)
-	print("[DEBUG find_path] from=", from_axial, " to=", to_axial, " self_faction=", self_faction, " id_path.size=", id_path.size(), " from_disabled=", from_was_disabled, " ally_restores=", ally_restores.size(), " enemy_disables=", enemy_disables.size())
+	var _log_path: bool = OS.is_debug_build() and DisplayServer.get_name() != "headless"
+	if _log_path:
+		print("[DEBUG find_path] from=", from_axial, " to=", to_axial, " self_faction=", self_faction, " id_path.size=", id_path.size(), " from_disabled=", from_was_disabled, " ally_restores=", ally_restores.size(), " enemy_disables=", enemy_disables.size())
 
 	# 还原
 	_astar.set_point_disabled(from_id, from_was_disabled)
@@ -395,7 +432,8 @@ func find_path(from_axial: Vector2i, to_axial: Vector2i, ignore_occupant_at: Vec
 		_astar.set_point_disabled(pair[0], false)
 
 	if id_path.size() <= 1:
-		print("[DEBUG find_path] id_path too short, return []")
+		if _log_path:
+			print("[DEBUG find_path] id_path too short, return []")
 		return []
 	# 转回 axial（去掉起点；终点若是友方格则返回空——不能停在友方格）
 	var result: Array[Vector2i] = []
@@ -405,10 +443,12 @@ func find_path(from_axial: Vector2i, to_axial: Vector2i, ignore_occupant_at: Vec
 	# 终点不能是友方占用格，也不能是敌方占用格
 	if result.size() > 0 and _occupants.has(result[-1]):
 		var end_occ = _occupants[result[-1]]
-		print("[DEBUG find_path] end occupied by ", end_occ)
+		if _log_path:
+			print("[DEBUG find_path] end occupied by ", end_occ)
 		if end_occ != null and end_occ.has_method("get_faction") and self_faction >= 0:
 			# 无论友方还是敌方，都不能停在有单位的格子
-			print("[DEBUG find_path] end occupied, return []")
+			if _log_path:
+				print("[DEBUG find_path] end occupied, return []")
 			return []
 	# 中间路径不能穿过敌方格子（保险检查）
 	for i in range(0, result.size() - 1):
@@ -417,9 +457,11 @@ func find_path(from_axial: Vector2i, to_axial: Vector2i, ignore_occupant_at: Vec
 			if mid_occ != null and mid_occ.has_method("get_faction") \
 					and self_faction >= 0 and mid_occ.get_faction() != self_faction \
 					and mid_occ.has_method("is_alive") and mid_occ.is_alive():
-				print("[DEBUG find_path] crossing enemy at ", result[i], " return []")
+				if _log_path:
+					print("[DEBUG find_path] crossing enemy at ", result[i], " return []")
 				return []  # 路径穿越敌方格，视为不可达
-	print("[DEBUG find_path] result=", result)
+	if _log_path:
+		print("[DEBUG find_path] result=", result)
 	return result
 
 
@@ -461,7 +503,22 @@ func get_reachable(origin: Vector2i, max_steps: int, self_faction: int = -1) -> 
 			visited[n] = cur_step + 1
 			queue.append(n)
 			result.append(n)
-	print("[DEBUG get_reachable] origin=", origin, " max_steps=", max_steps, " self_faction=", self_faction, " result_count=", result.size(), " result=", result)
+	if OS.is_debug_build() and DisplayServer.get_name() != "headless":
+		print("[DEBUG get_reachable] origin=", origin, " max_steps=", max_steps, " self_faction=", self_faction, " result_count=", result.size(), " result=", result)
+	return result
+
+
+## 取攻击射程内所有可走格（用于红色范围高亮；含空格）
+func get_attack_range_hexes(origin: Vector2i, range_min: int, range_max: int) -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	var rmin: int = maxi(1, range_min)
+	var rmax: int = maxi(rmin, range_max)
+	for axial in _hexes.keys():
+		if axial == origin:
+			continue
+		var d: int = HexCoord.distance(origin, axial)
+		if d >= rmin and d <= rmax:
+			result.append(axial)
 	return result
 
 
@@ -545,8 +602,10 @@ func set_highlight_move(hexes: Array[Vector2i]) -> void:
 	queue_redraw()
 
 
-func set_highlight_attack(hexes: Array[Vector2i]) -> void:
-	_highlight_attack = hexes
+## BB 风攻击选中态：敌方小红标 + 射程内其他格小灰标（不铺红底）
+func set_highlight_attack_range(marker_hexes: Array[Vector2i], enemy_hexes: Array[Vector2i]) -> void:
+	_highlight_attack_markers = marker_hexes
+	_highlight_attack_enemy = enemy_hexes
 	queue_redraw()
 
 
@@ -572,7 +631,8 @@ func set_selected(axial: Vector2i) -> void:
 
 func clear_highlights() -> void:
 	_highlight_move.clear()
-	_highlight_attack.clear()
+	_highlight_attack_markers.clear()
+	_highlight_attack_enemy.clear()
 	_highlight_path.clear()
 	_highlight_zoc.clear()
 	_highlight_oa_steps.clear()
@@ -607,20 +667,22 @@ func get_map_bounds() -> Rect2:
 # ──────────── 输入处理 ────────────
 ## 注意：event.position 是 viewport 坐标，不是世界坐标。
 ## 用 get_global_mouse_position() 拿到真正的世界坐标（已包含 Camera 偏移修正）。
-## 用 _input 而非 _unhandled_input，避免被 Control 节点（如 ColorRect 背景）静默拦截。
-## 我们靠 _hexes.has(ax) 自己判断是否在地图内，UI 区域的过滤交给 BattleScene 用更精确的方式做。
+## 悬停用 _input；点击用 _unhandled_input，让 UI 按钮优先消费事件。
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		var ax: Vector2i = world_to_axial(get_global_mouse_position())
 		if _hover_hex != ax:
 			_hover_hex = ax
 			queue_redraw()
-			# 永远 emit（即便光标离开地图），让上层决定如何处理"无效格"
 			hex_hovered.emit(ax)
-	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var ax: Vector2i = world_to_axial(get_global_mouse_position())
 		if _hexes.has(ax):
 			hex_clicked.emit(ax)
+			get_viewport().set_input_as_handled()
 
 
 ## 地形层绘制（只在初始化时调用一次，连接到 _terrain_layer.draw 信号）
@@ -706,23 +768,33 @@ func _draw_terrain() -> void:
 		_terrain_layer.draw_colored_polygon(pts, dark_overlay)
 
 
+# ──────────── BB 风攻击射程小标 ────────────
+func _draw_range_marker(center: Vector2, fill: Color, radius_scale: float) -> void:
+	var r: float = HEX_SIZE * radius_scale
+	var pts: PackedVector2Array = HexCoord.corners(center, r)
+	draw_colored_polygon(pts, fill)
+	var edge := pts.duplicate()
+	edge.append(pts[0])
+	draw_polyline(edge, CombatPalette.with_alpha(fill, minf(1.0, fill.a + 0.25)), 1.0, true)
+
+
 # ──────────── 渲染（高亮层，每帧刷新） ────────────
 ## 60Hz 推动重绘，用于高亮呼吸/路径动画
 func _process(_delta: float) -> void:
-	if not _highlight_move.is_empty() or not _highlight_attack.is_empty() \
+	if not _highlight_move.is_empty() or not _highlight_attack_markers.is_empty() \
+			or not _highlight_attack_enemy.is_empty() \
 			or not _highlight_oa_steps.is_empty() or not _highlight_path.is_empty():
 		queue_redraw()
 
 
 func _draw() -> void:
-	# 颜色定义（仅高亮层需要的颜色）
-	var color_hover    := Color(0.95, 0.80, 0.30, 0.22)
-	var color_move     := Color(0.29, 0.56, 0.85, 0.40)
-	var color_attack   := Color(0.85, 0.29, 0.29, 0.50)
-	var color_path     := Color(0.95, 0.78, 0.30, 0.85)
-	var color_zoc      := Color(0.95, 0.55, 0.25, 0.16)
-	var color_oa       := Color(1.0, 0.40, 0.25, 0.92)
-	var color_selected := Color(0.95, 0.90, 0.78, 0.95)
+	var color_hover: Color = CombatPalette.hex_hover
+	var color_move: Color = CombatPalette.hex_move
+	var color_attack: Color = CombatPalette.hex_attack
+	var color_path: Color = CombatPalette.hex_path
+	var color_zoc: Color = CombatPalette.hex_zoc
+	var color_oa: Color = CombatPalette.hex_oa
+	var color_selected: Color = CombatPalette.hex_selected
 
 	var t_ms: float = float(Time.get_ticks_msec())
 	var breath: float = 0.5 + 0.5 * sin(t_ms / 380.0)
@@ -741,17 +813,22 @@ func _draw() -> void:
 		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
 		draw_colored_polygon(pts, Color(color_move.r, color_move.g, color_move.b, move_alpha))
 
-	# ---- 4) 攻击范围（呼吸 + 内部短描边） ----
-	var atk_alpha: float = color_attack.a * (0.7 + 0.3 * breath)
-	for axial in _highlight_attack:
-		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
-		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
-		draw_colored_polygon(pts, Color(color_attack.r, color_attack.g, color_attack.b, atk_alpha))
-		# 红色细边强化
-		var pts_atk_edge: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 4.0)
-		var pts_closed := pts_atk_edge.duplicate()
-		pts_closed.append(pts_atk_edge[0])
-		draw_polyline(pts_closed, Color(0.95, 0.35, 0.30, 0.5), 1.2, true)
+	# ---- 4) 攻击射程（BB 风：灰标=射程内空格，红标=可攻击敌方） ----
+	var marker_breath: float = 0.85 + 0.15 * breath
+	for axial in _highlight_attack_markers:
+		var center_g: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var gc: Color = CombatPalette.hex_attack_marker
+		_draw_range_marker(center_g, Color(gc.r, gc.g, gc.b, gc.a * marker_breath), 0.26)
+	for axial in _highlight_attack_enemy:
+		var center_r: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var pts_en: PackedVector2Array = HexCoord.corners(center_r, HEX_SIZE - 1.0)
+		var atk_fill: Color = color_attack
+		var en_alpha: float = atk_fill.a * (0.72 + 0.28 * breath)
+		draw_colored_polygon(pts_en, Color(atk_fill.r, atk_fill.g, atk_fill.b, en_alpha))
+		var pts_edge: PackedVector2Array = HexCoord.corners(center_r, HEX_SIZE - 4.0)
+		var pts_closed := pts_edge.duplicate()
+		pts_closed.append(pts_edge[0])
+		draw_polyline(pts_closed, CombatPalette.hex_attack_edge, 1.6, true)
 
 	# ---- 5) 路径（朝下一格的渐进金色三角） ----
 	for i in range(_highlight_path.size()):
@@ -784,7 +861,8 @@ func _draw() -> void:
 		var center: Vector2 = HexCoord.axial_to_pixel(_highlight_selected, HEX_SIZE)
 		# 外柔光（更大六边形，alpha 极低）
 		var glow_pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE + 4.0)
-		draw_colored_polygon(glow_pts, Color(1.0, 0.95, 0.75, 0.10 + 0.06 * breath))
+		var glow_a: float = CombatPalette.hex_selected_glow.a + 0.06 * breath
+		draw_colored_polygon(glow_pts, CombatPalette.with_alpha(CombatPalette.hex_selected_glow, glow_a))
 		# 描边
 		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
 		var pts_closed := pts.duplicate()

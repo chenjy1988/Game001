@@ -102,7 +102,12 @@ func _refresh(_u = null) -> void:
 	]
 
 	if _bound_unit.weapon:
-		weapon_label.text = "武器：" + _bound_unit.weapon.to_string_brief()
+		var w = _bound_unit.weapon
+		var mode: String = w.attack_modes[0] if not w.attack_modes.is_empty() else "slash"
+		var pen: float = DamageSystem.penetration_rate_for(w, mode)
+		weapon_label.text = "武器：%s  基伤 %d  重 %d  渗透 %.0f%%（%s）" % [
+			w.display_name, w.damage_base, w.weight, pen * 100.0, mode
+		]
 	if _bound_unit.armor:
 		armor_label.text = "护甲：" + _bound_unit.armor.to_string_brief()
 

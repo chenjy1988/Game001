@@ -1,5 +1,7 @@
 extends Node2D
 class_name Unit
+
+const _CombatModifier = preload("res://scripts/core/CombatModifier.gd")
 ##
 ## Unit.gd — 战场单位
 ##
@@ -25,9 +27,12 @@ var preempt_initiative_bonus: int = 0       ## 先发制人 +Init 值（通常 +
 # ──── 移动技能标志 ────
 var ignore_oa_this_move: bool = false       ## 本次移动无视借机攻击（滑步技能激活时设为 true，移动结束后自动清除）
 
+const BREATH_AP_COST: int = 9               ## class-system.md §5.4：吐纳调息
+
 var axial_pos: Vector2i = Vector2i.ZERO
 var hex_grid: HexGrid = null               ## 由 BattleScene 注入
 var _registered_at_pos: bool = true         ## self 是否在 _occupants[axial_pos] 中（穿过友方格子时暂不注册）
+var facing_dir: int = 0                    ## 面朝六方向；开战初始化 + 每次移动/攻击后更新，夹击判定用
 
 const MOVE_SPEED_PX_PER_SEC: float = 220.0
 const FATIGUE_PER_HEX: int = 3             ## 每移动 1 hex 消耗的疲劳
@@ -144,6 +149,37 @@ func has_unfamiliar_weapon() -> bool:
 	return not job.has_weapon(weapon.id)
 
 
+## 职业武器池内视为专精（匕首：普攻 AP 4 → 3）
+func has_weapon_mastery() -> bool:
+	if job == null or weapon == null:
+		return false
+	return job.has_weapon(weapon.id)
+
+
+## 本次普攻实际 AP 消耗（含武器专精修正）
+func get_weapon_ap_cost() -> int:
+	if weapon == null:
+		return 999
+	var cost: int = weapon.ap_cost
+	if weapon.id == "dagger" and has_weapon_mastery():
+		cost = maxi(1, cost - 1)
+	return cost
+
+
+## 当前激活 debuff（气力档 + 手拙等），战斗修正与 UI 状态栏共用此列表
+func get_active_debuffs() -> Array:
+	if not stats:
+		return []
+	var debuffs: Array = [_CombatModifier.stamina_tier_for(stats)]
+	if has_unfamiliar_weapon():
+		debuffs.append(_CombatModifier.clumsy())
+	return debuffs
+
+
+func get_combat_modifiers() -> Array:
+	return get_active_debuffs()
+
+
 func is_alive() -> bool:
 	return stats and stats.is_alive()
 
@@ -210,6 +246,27 @@ func use_ability_preempt() -> bool:
 	return true
 
 
+func breath_regulation_floor_fatigue() -> int:
+	## 吐纳调息恢复目标：气力恢复至 [上限 - (甲+武器)总重] → fatigue = 总重
+	return get_total_weight()
+
+
+func can_use_breath_regulation() -> bool:
+	## class-system.md §5.4：消耗 9 AP，恢复至装备负重下限（与是否移动/攻击无关）
+	if not stats or not is_alive():
+		return false
+	return stats.ap >= BREATH_AP_COST
+
+
+func use_ability_breath_regulation() -> bool:
+	if not can_use_breath_regulation():
+		return false
+	stats.spend_ap(BREATH_AP_COST)
+	stats.fatigue = breath_regulation_floor_fatigue()
+	stats_changed.emit(self)
+	return true
+
+
 func reset_turn_effects() -> void:
 	## 每回合开始时清除先发制人加值（单次技能，不跨回合）
 	preempt_active = false
@@ -218,9 +275,13 @@ func reset_turn_effects() -> void:
 
 func place_at(axial: Vector2i, grid: HexGrid) -> void:
 	hex_grid = grid
-	axial_pos = axial
-	position = HexCoord.axial_to_pixel(axial, HexGrid.HEX_SIZE)
-	hex_grid.set_occupant(axial, self)
+	var resolved: Vector2i = grid.find_nearest_standable(axial)
+	if resolved != axial:
+		var name_str: String = stats.unit_name if stats else "?"
+		push_warning("[Unit] %s 出生点 %s 不可站立，已移至 %s" % [name_str, axial, resolved])
+	axial_pos = resolved
+	position = HexCoord.axial_to_pixel(resolved, HexGrid.HEX_SIZE)
+	hex_grid.set_occupant(resolved, self)
 
 
 # ──────────── 回合 ────────────
@@ -253,7 +314,140 @@ func move_along_path(path: Array[Vector2i]) -> bool:
 	return true
 
 
+## 仿真专用：同步走完路径（无 tween，供 battle_sim 无头跑局）
+func move_along_path_sync(path: Array[Vector2i]) -> bool:
+	if path.is_empty() or not is_alive():
+		return false
+	var ap_needed: int = path.size() * AP_PER_HEX
+	if stats.ap < ap_needed:
+		return false
+	_walk_path_immediate(path)
+	return true
+
+
+func _walk_path_immediate(path: Array[Vector2i]) -> void:
+	var path_start: Vector2i = axial_pos
+	var from: Vector2i = axial_pos
+	_registered_at_pos = true
+	var has_ally_in_path: bool = false
+	for i in range(0, path.size() - 1):
+		var mid_occ = hex_grid.get_occupant(path[i])
+		if mid_occ != null and mid_occ != self \
+				and mid_occ.is_alive() and mid_occ.get_faction() == get_faction():
+			has_ally_in_path = true
+			break
+	if has_ally_in_path:
+		_jump_along_path_sync(path, from)
+		return
+	for step in path:
+		if not _walk_single_step(step, from):
+			return
+		from = step
+	ignore_oa_this_move = false
+	_apply_facing_from_path(path, path_start)
+	stats_changed.emit(self)
+
+
+func _walk_single_step(step: Vector2i, from: Vector2i) -> bool:
+	if not hex_grid.is_in_map(step):
+		return false
+	var leaving_ctrls: Array = []
+	if not ignore_oa_this_move:
+		leaving_ctrls = hex_grid.get_zoc_controllers(axial_pos, get_faction())
+	stats.spend_ap(AP_PER_HEX)
+	stats.add_fatigue(FATIGUE_PER_HEX)
+	var hit_blocked: bool = false
+	for ctrl in leaving_ctrls:
+		if not is_alive():
+			break
+		var oa_result: Dictionary = DamageSystem.execute_attack(ctrl, self)
+		oa_result["is_opportunity_attack"] = true
+		var def_fat: int = DamageSystem.calculate_defend_fatigue(self)
+		if def_fat > 0:
+			stats.add_fatigue(def_fat)
+			oa_result["defend_fatigue"] = def_fat
+		_apply_attack_result(ctrl, self, oa_result)
+		ctrl.face_toward(axial_pos)
+		ctrl.attacked.emit(ctrl, self, oa_result)
+		if oa_result.get("hit", false) or not is_alive():
+			hit_blocked = true
+			break
+	if hit_blocked or not is_alive():
+		if not _registered_at_pos:
+			hex_grid.set_occupant(axial_pos, self)
+			_registered_at_pos = true
+		ignore_oa_this_move = false
+		stats_changed.emit(self)
+		return false
+	position = HexCoord.axial_to_pixel(step, HexGrid.HEX_SIZE)
+	var step_occ = hex_grid.get_occupant(step)
+	if step_occ != null and step_occ != self and step_occ.is_alive() \
+			and step_occ.get_faction() != get_faction():
+		if not _registered_at_pos:
+			hex_grid.set_occupant(axial_pos, self)
+			_registered_at_pos = true
+		ignore_oa_this_move = false
+		stats_changed.emit(self)
+		return false
+	var step_has_friendly: bool = step_occ != null and step_occ != self \
+		and step_occ.is_alive() and step_occ.get_faction() == get_faction()
+	if step_has_friendly:
+		if _registered_at_pos:
+			hex_grid.set_occupant(axial_pos, null)
+		_registered_at_pos = false
+	else:
+		if _registered_at_pos:
+			hex_grid.move_occupant(axial_pos, step, self)
+		else:
+			hex_grid.set_occupant(step, self)
+		_registered_at_pos = true
+	axial_pos = step
+	moved.emit(self, from, step)
+	return true
+
+
+func _jump_along_path_sync(path: Array[Vector2i], from: Vector2i) -> void:
+	var dest_axial: Vector2i = path[-1]
+	var leaving_ctrls: Array = hex_grid.get_zoc_controllers(axial_pos, get_faction())
+	stats.spend_ap(AP_PER_HEX)
+	stats.add_fatigue(FATIGUE_PER_HEX)
+	for ctrl in leaving_ctrls:
+		if not is_alive():
+			break
+		var oa_result: Dictionary = DamageSystem.execute_attack(ctrl, self)
+		oa_result["is_opportunity_attack"] = true
+		var def_fat: int = DamageSystem.calculate_defend_fatigue(self)
+		if def_fat > 0:
+			stats.add_fatigue(def_fat)
+			oa_result["defend_fatigue"] = def_fat
+		_apply_attack_result(ctrl, self, oa_result)
+		ctrl.face_toward(axial_pos)
+		ctrl.attacked.emit(ctrl, self, oa_result)
+		if oa_result.get("hit", false) or not is_alive():
+			if not _registered_at_pos:
+				hex_grid.set_occupant(axial_pos, self)
+				_registered_at_pos = true
+			stats_changed.emit(self)
+			return
+	if not hex_grid.is_in_map(dest_axial):
+		stats_changed.emit(self)
+		return
+	if path.size() > 1:
+		stats.spend_ap(AP_PER_HEX * (path.size() - 1))
+		stats.add_fatigue(FATIGUE_PER_HEX * (path.size() - 1))
+	position = HexCoord.axial_to_pixel(dest_axial, HexGrid.HEX_SIZE)
+	if _registered_at_pos:
+		hex_grid.set_occupant(axial_pos, null)
+	hex_grid.set_occupant(dest_axial, self)
+	_registered_at_pos = true
+	axial_pos = dest_axial
+	moved.emit(self, from, dest_axial)
+	_apply_facing_from_path(path, from)
+	stats_changed.emit(self)
+
+
 func _animate_path(path: Array[Vector2i]) -> void:
+	var path_start: Vector2i = axial_pos
 	var from: Vector2i = axial_pos
 	_registered_at_pos = true  ## 移动开始时，self 在 _occupants 中
 
@@ -302,6 +496,7 @@ func _animate_path(path: Array[Vector2i]) -> void:
 				stats.add_fatigue(def_fat)
 				oa_result["defend_fatigue"] = def_fat
 			_apply_attack_result(ctrl, self, oa_result)
+			ctrl.face_toward(axial_pos)
 			ctrl.attacked.emit(ctrl, self, oa_result)
 			if oa_result.get("hit", false) or not is_alive():
 				hit_blocked = true
@@ -364,6 +559,7 @@ func _animate_path(path: Array[Vector2i]) -> void:
 			get_unit_name(), axial_pos, position, expected_px, str(position - expected_px)
 		])
 	ignore_oa_this_move = false  # 移动结束，清除滑步标志
+	_apply_facing_from_path(path, path_start)
 	stats_changed.emit(self)
 
 
@@ -389,6 +585,7 @@ func _jump_along_path(path: Array[Vector2i], from: Vector2i) -> void:
 			stats.add_fatigue(def_fat)
 			oa_result["defend_fatigue"] = def_fat
 		_apply_attack_result(ctrl, self, oa_result)
+		ctrl.face_toward(axial_pos)
 		ctrl.attacked.emit(ctrl, self, oa_result)
 		if oa_result.get("hit", false) or not is_alive():
 			# 命中/死亡 → 中断跳跃，留在原地
@@ -427,6 +624,7 @@ func _jump_along_path(path: Array[Vector2i], from: Vector2i) -> void:
 	axial_pos = dest_axial
 
 	moved.emit(self, from, dest_axial)
+	_apply_facing_from_path(path, from)
 	stats_changed.emit(self)
 
 
@@ -453,7 +651,8 @@ static func _apply_attack_result(_attacker: Unit, target: Unit, result: Dictiona
 func attack_target(target: Unit, attack_mode: String = "") -> Dictionary:
 	if not is_alive() or not target.is_alive() or weapon == null:
 		return {}
-	if stats.ap < weapon.ap_cost:
+	var attack_ap: int = get_weapon_ap_cost()
+	if stats.ap < attack_ap:
 		return {"reason": "not_enough_ap"}
 	var dist: int = HexCoord.distance(axial_pos, target.axial_pos)
 	if dist > weapon.attack_range:
@@ -464,7 +663,7 @@ func attack_target(target: Unit, attack_mode: String = "") -> Dictionary:
 		dist, str((target.position - position).round())
 	])
 
-	stats.spend_ap(weapon.ap_cost)
+	stats.spend_ap(attack_ap)
 	stats.add_fatigue(weapon.fatigue_cost)
 
 	# 如果没指定攻击模式，默认用第一个
@@ -481,6 +680,7 @@ func attack_target(target: Unit, attack_mode: String = "") -> Dictionary:
 		result["defend_fatigue"] = defend_fat
 
 	_apply_attack_result(self, target, result)
+	face_toward(target.axial_pos)
 
 	stats_changed.emit(self)
 	attacked.emit(self, target, result)
@@ -495,35 +695,74 @@ func attack_target(target: Unit, attack_mode: String = "") -> Dictionary:
 
 
 # ──────────── 夹击 ────────────
-## 检查并触发夹击：主攻击者对 target 的反方向（对侧）若有同阵营、活着、近战、装备齐的友军
-## → 该友军立刻发动一次"夹击补刀"，伤害 50%，不消耗 AP/Fatigue。
-## 不触发再级联：is_pincer_attack=true 的 result 不会再次检查 pincer。
-##
-## 限制：
-## ① 主攻击者 A 必须在 target 的近战 / 长矛攻击范围内（距离 ≤ 2）
-##    → 远程武器（弓 / 弩 距离 ≥ 3）不触发夹击（"我射箭对侧友军怎么夹"）
-## ② B 必须站在 target 的对侧（即 target 背对 B）—— 用 A 反推 T 的"朝向"
-##    无朝向系统下，"T 永远面向刚攻击它的 A" 是合理简化
-## ③ 借机攻击命中（is_opportunity_attack）不触发夹击 —— 在 attack_target 处已过滤
-const PINCER_DAMAGE_MULT: float = 0.5   ## 夹击补刀伤害系数（主攻击的 50%）
+## 夹击（class-system.md §4.3.1）：
+## ① **正面格队友 A** 对 T 发起攻击（A 站在 T 面朝方向那一邻格）
+## ② T **背后格**有己方近战 B（A 的正对侧）
+## ③ Wisdom 概率（攻方 A）：`clamp(20% + (A.wis - T.wis)×0.5%, 5%, 75%)`
+## ④ 主攻击命中后 B 补刀 ×50% 伤害，不耗 AP/气力；与武器攻击距离无关；不连锁
+const PINCER_DAMAGE_MULT: float = 0.5
+
+## 面朝某格：攻击后朝向目标；背后 = (facing_dir + 3) % 6
+func face_toward(axial: Vector2i) -> void:
+	facing_dir = HexCoord.approx_direction(axial_pos, axial)
+
+
+## 开战初始化：面朝最近敌方（不要求相邻，用 approx_direction）
+func face_nearest_enemy(units: Array) -> void:
+	var best_dist: int = 999999
+	var best_axial: Vector2i = axial_pos
+	var my_faction: int = get_faction()
+	for u in units:
+		if u == null or u == self or not u.is_alive():
+			continue
+		if u.get_faction() == my_faction:
+			continue
+		var dist: int = HexCoord.distance(axial_pos, u.axial_pos)
+		if dist < best_dist:
+			best_dist = dist
+			best_axial = u.axial_pos
+	if best_dist < 999999:
+		face_toward(best_axial)
+
+
+## 移动落位后：倒数第二格 → 终点 为面朝方向（背后即来向那一格）
+func _apply_facing_from_path(path: Array[Vector2i], path_start: Vector2i) -> void:
+	if path.is_empty():
+		return
+	var final_axial: Vector2i = path[-1]
+	var penultimate: Vector2i = path[-2] if path.size() >= 2 else path_start
+	face_along_step(penultimate, final_axial)
+
+
+func face_along_step(from_axial: Vector2i, to_axial: Vector2i) -> void:
+	facing_dir = HexCoord.approx_direction(from_axial, to_axial)
+
+
+static func _pincer_chance(attacker: Unit, target: Unit) -> float:
+	var aw: int = attacker.stats.wisdom if attacker.stats else 40
+	var tw: int = target.stats.wisdom if target.stats else 40
+	return clampf(0.20 + float(aw - tw) * 0.005, 0.05, 0.75)
+
 
 func _try_pincer_attack(target: Unit) -> void:
 	if hex_grid == null or target == null or not target.is_alive():
 		return
-	# 限制 ①：A 必须在近战 / 长矛范围内（距离 ≤ 2）才能触发夹击
-	# 远程武器射击对侧友军没有"夹击"物理意义
-	if HexCoord.distance(axial_pos, target.axial_pos) > 2:
+	if weapon == null or weapon.weapon_type != "melee":
 		return
-	# 取对侧格（A 反推 T 的朝向 → T 背对的格子）
-	var opp_cell: Vector2i = HexCoord.opposite_across(axial_pos, target.axial_pos)
-	var ally: Unit = hex_grid.get_occupant(opp_cell)
+	# 主攻击者必须在敌人正面格发起攻击
+	if not HexCoord.is_front_hex(axial_pos, target.axial_pos, target.facing_dir):
+		return
+	if randf() > _pincer_chance(self, target):
+		return
+	# 背后格（主攻击者正对侧）的队友补刀
+	var rear_cell: Vector2i = HexCoord.opposite_across(axial_pos, target.axial_pos)
+	var ally: Unit = hex_grid.get_occupant(rear_cell)
 	if ally == null or ally == self or not ally.is_alive():
 		return
 	if ally.get_faction() != get_faction():
 		return
 	if ally.weapon == null or ally.weapon.weapon_type != "melee":
 		return
-	# 触发夹击：用 ally 的武器执行一次衰减伤害的攻击
 	var pincer_result: Dictionary = DamageSystem.execute_attack(ally, target)
 	pincer_result["is_pincer_attack"] = true
 	# 伤害衰减
@@ -560,40 +799,79 @@ var _visual_offset: Vector2 = Vector2.ZERO :
 		_visual_offset = value
 		queue_redraw()
 
+var _visual_scale: Vector2 = Vector2.ONE :
+	set(value):
+		_visual_scale = value
+		queue_redraw()
 
-## 受击：左右抖动 + modulate 闪红/闪灰
-func play_hit_reaction(hit_strength: float = 0.6, was_hit: bool = true) -> void:
+
+func _apply_draw_transform(flip_x: bool = false) -> void:
+	var scale := Vector2(-_visual_scale.x, _visual_scale.y) if flip_x else _visual_scale
+	if _visual_offset != Vector2.ZERO or scale != Vector2.ONE:
+		draw_set_transform(_visual_offset, 0.0, scale)
+
+
+## 受击：击退 + 挤压 + 白闪 → 染色回弹（maximizing-game-feel）
+func play_hit_reaction(hit_strength: float = 0.6, was_hit: bool = true,
+		from_axial: Vector2i = Vector2i(99999, 99999), is_crit: bool = false) -> void:
 	if not is_alive():
 		return
-	# 受击染色
-	var flash_color: Color
-	if was_hit:
-		flash_color = Color(2.0, 0.5, 0.5)  # 强烈偏红
-	else:
-		flash_color = Color(1.4, 1.4, 1.4)
+	var knock_dir := Vector2.RIGHT
+	if from_axial != Vector2i(99999, 99999):
+		knock_dir = (
+			HexCoord.axial_to_pixel(axial_pos, HexGrid.HEX_SIZE)
+			- HexCoord.axial_to_pixel(from_axial, HexGrid.HEX_SIZE)
+		).normalized()
+		if knock_dir.length_squared() < 0.01:
+			knock_dir = Vector2.RIGHT
+
+	var strength: float = clamp(hit_strength, 0.0, 1.0)
+	var squash: Vector2 = Vector2(1.14, 0.86) if was_hit else Vector2.ONE
+	if is_crit:
+		squash = Vector2(1.20, 0.80)
+
 	var color_tween := create_tween()
-	color_tween.tween_property(self, "modulate", flash_color, 0.05)
-	color_tween.tween_property(self, "modulate", Color(1, 1, 1), 0.20)
+	color_tween.tween_property(self, "modulate", CombatPalette.hit_flash_white, 0.03)
+	if was_hit:
+		var tint: Color = CombatPalette.hit_flash_crit if is_crit else CombatPalette.hit_flash_damage
+		color_tween.tween_property(self, "modulate", tint, 0.05)
+	else:
+		color_tween.tween_property(self, "modulate", CombatPalette.hit_flash_miss, 0.04)
+	color_tween.tween_property(self, "modulate", Color.WHITE, 0.22)
 
-	# 抖动 _visual_offset 而不是 position，避免和 _animate_path 冲突
-	var amp: float = lerp(4.0, 10.0, clamp(hit_strength, 0.0, 1.0))
+	var kb: float = lerpf(5.0, 14.0, strength)
+	if is_crit:
+		kb *= 1.25
+	var knock: Vector2 = knock_dir * kb
 	var shake_tween := create_tween()
-	shake_tween.tween_property(self, "_visual_offset", Vector2(-amp, 0), 0.04)
-	shake_tween.tween_property(self, "_visual_offset", Vector2( amp, 0), 0.05)
-	shake_tween.tween_property(self, "_visual_offset", Vector2(-amp * 0.5, 0), 0.05)
-	shake_tween.tween_property(self, "_visual_offset", Vector2.ZERO, 0.06)
+	shake_tween.set_parallel(true)
+	shake_tween.tween_property(self, "_visual_scale", squash, 0.04)
+	shake_tween.tween_property(self, "_visual_offset", knock, 0.05).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	shake_tween.chain().set_parallel(true)
+	shake_tween.tween_property(self, "_visual_offset", knock * 0.35 + Vector2(0, 1.5), 0.05)
+	shake_tween.tween_property(self, "_visual_scale", Vector2(0.96, 1.04), 0.06)
+	shake_tween.chain().set_parallel(true)
+	shake_tween.tween_property(self, "_visual_offset", Vector2.ZERO, 0.10).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	shake_tween.tween_property(self, "_visual_scale", Vector2.ONE, 0.12).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
-## 攻击者前冲：朝目标方向 lunge ~35% 距离再回来；也用 _visual_offset
+## 攻击者前冲：蓄力后冲 → 回位；用 _visual_offset，不碰碰撞格
 func play_attack_lunge(target_axial: Vector2i) -> void:
 	if not is_alive():
 		return
 	var dir: Vector2 = (HexCoord.axial_to_pixel(target_axial, HexGrid.HEX_SIZE)
 		- HexCoord.axial_to_pixel(axial_pos, HexGrid.HEX_SIZE)).normalized()
-	var lunge_off: Vector2 = dir * (HexGrid.HEX_SIZE * 0.45)
+	if dir.length_squared() < 0.01:
+		dir = Vector2.RIGHT
+	var pull_back: Vector2 = -dir * (HexGrid.HEX_SIZE * 0.14)
+	var lunge_off: Vector2 = dir * (HexGrid.HEX_SIZE * 0.50)
 	var tween := create_tween()
-	tween.tween_property(self, "_visual_offset", lunge_off, 0.08).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(self, "_visual_offset", Vector2.ZERO, 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.tween_property(self, "_visual_scale", Vector2(0.94, 1.06), 0.05)
+	tween.parallel().tween_property(self, "_visual_offset", pull_back, 0.05)
+	tween.tween_property(self, "_visual_offset", lunge_off, 0.07).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_property(self, "_visual_scale", Vector2(1.08, 0.92), 0.07)
+	tween.tween_property(self, "_visual_offset", Vector2.ZERO, 0.14).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.parallel().tween_property(self, "_visual_scale", Vector2.ONE, 0.14)
 
 
 func _process(_delta: float) -> void:
@@ -605,9 +883,7 @@ func _process(_delta: float) -> void:
 func _draw() -> void:
 	if not is_alive():
 		return
-	# 应用视觉 offset（受击抖动、出击 lunge）
-	if _visual_offset != Vector2.ZERO:
-		draw_set_transform(_visual_offset, 0.0, Vector2.ONE)
+	_apply_draw_transform()
 
 	# 有外部 sprite → 走 sprite 渲染路径（带阴影/光环/HP/箭头/武器叠加），并提前返回
 	if _sprite_texture != null:
@@ -623,15 +899,15 @@ func _draw() -> void:
 	var trim_color: Color
 	var glow_color: Color
 	if get_faction() == 0:
-		tunic_color = Color(0.30, 0.52, 0.82)
-		tunic_dark  = Color(0.18, 0.32, 0.55)
-		trim_color  = Color(0.83, 0.70, 0.30)
-		glow_color  = Color(0.45, 0.75, 1.0)
+		tunic_color = CombatPalette.with_alpha(CombatPalette.ally, 1.0).lerp(Color.WHITE, 0.35)
+		tunic_dark  = CombatPalette.ally.darkened(0.35)
+		trim_color  = CombatPalette.accent_gold
+		glow_color  = CombatPalette.ally_glow
 	else:
-		tunic_color = Color(0.72, 0.24, 0.24)
-		tunic_dark  = Color(0.45, 0.13, 0.13)
+		tunic_color = CombatPalette.enemy.lerp(Color.WHITE, 0.12)
+		tunic_dark  = CombatPalette.enemy.darkened(0.35)
 		trim_color  = Color(0.20, 0.18, 0.14)
-		glow_color  = Color(1.0, 0.45, 0.40)
+		glow_color  = CombatPalette.enemy_glow
 
 	var skin_color := Color(0.92, 0.78, 0.62)
 	var skin_dark  := Color(0.70, 0.55, 0.42)
@@ -917,8 +1193,7 @@ func _draw_sprite_mode() -> void:
 	var t_ms: float = float(Time.get_ticks_msec())
 	var breath: float = 0.5 + 0.5 * sin(t_ms / 380.0)
 
-	var glow_color: Color = (Color(0.45, 0.75, 1.0) if get_faction() == 0
-		else Color(1.0, 0.45, 0.40))
+	var glow_color: Color = CombatPalette.ally_glow if get_faction() == 0 else CombatPalette.enemy_glow
 	var shadow_y: float = 16.0
 
 	# 心跳上跳偏移（仅当前回合且己方）
@@ -946,12 +1221,11 @@ func _draw_sprite_mode() -> void:
 		draw_size,
 	)
 	if get_faction() == 1:
-		# 红方：在画 sprite 之前临时翻转 X，画完立刻恢复
-		# 注意要把外层 _visual_offset 一起带上，否则会回到 (0,0)
-		draw_set_transform(_visual_offset, 0.0, Vector2(-1.0, 1.0))
+		_apply_draw_transform(true)
 		draw_texture_rect(_sprite_texture, sprite_rect, false)
-		draw_set_transform(_visual_offset, 0.0, Vector2.ONE)
+		_apply_draw_transform()
 	else:
+		_apply_draw_transform()
 		draw_texture_rect(_sprite_texture, sprite_rect, false)
 
 	# 4) HP 条（在角色"头顶上方"，战兄弟风格的横条）— 跟随心跳
