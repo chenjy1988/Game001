@@ -50,7 +50,7 @@ static func _calculate_sort_score(unit: Unit, _all_units: Array[Unit], _include_
 		ww = int(unit.weapon.weight)
 	elif unit.weapon:
 		ww = int(unit.weapon.weight)
-	var base_init: float = float(unit.stats.base_initiative - unit.stats.fatigue)
+	var base_init: float = float(unit.stats.base_initiative - unit.stats.stamina_spent())
 	base_init -= float(floor(float(aw) / 4.0))
 	base_init -= float(floor(float(ww) / 4.0))
 	if unit.preempt_active:
@@ -96,24 +96,21 @@ static func preview_with_preempt_bonus(units: Array[Unit], activating_unit: Unit
 	# 创建虚拟副本列表（保留原始对象引用，但临时修改数据）
 	var virtual_units: Array[Unit] = []
 	var original_initiative: int = 0
-	var original_fatigue: int = 0
+	var original_stamina: int = 0
 
 	for unit in units:
 		virtual_units.append(unit)
 		if unit == activating_unit:
 			original_initiative = unit.stats.base_initiative
-			original_fatigue = unit.stats.fatigue
+			original_stamina = unit.stats.stamina
 
-	# 临时提升激活者的 Initiative + 模拟 fatigue 消耗
-	# 先发制人消耗：1 AP + 20 气力（重甲 ×1.6 = 32）
-	# 预演只影响排序，不模拟 AP；但 fatigue 直接影响 effective_initiative
+	# 临时提升激活者的 Initiative + 模拟气力消耗
 	if activating_unit:
 		activating_unit.stats.base_initiative += bonus_initiative
-		var fatigue_cost: int = 20
+		var stamina_cost: int = 20
 		if activating_unit.is_wearing_heavy_armor():
-			fatigue_cost = int(20 * 1.6)  # = 32
-		# 模拟使用先发制人后的 fatigue（不超过 max_stamina）
-		activating_unit.stats.fatigue = mini(activating_unit.stats.max_stamina, activating_unit.stats.fatigue + fatigue_cost)
+			stamina_cost = int(20 * 1.6)  # = 32
+		activating_unit.stats.stamina = maxi(0, activating_unit.stats.stamina - stamina_cost)
 
 	# 计算虚拟排序
 	var virtual_ordered: Array[Unit] = calculate_turn_order(virtual_units, true)
@@ -121,7 +118,7 @@ static func preview_with_preempt_bonus(units: Array[Unit], activating_unit: Unit
 	# 恢复激活者原始值
 	if activating_unit:
 		activating_unit.stats.base_initiative = original_initiative
-		activating_unit.stats.fatigue = original_fatigue
+		activating_unit.stats.stamina = original_stamina
 
 	# 转换为 TimelineEntry
 	var timeline: Array = []
@@ -140,6 +137,28 @@ static func preview_with_preempt_bonus(units: Array[Unit], activating_unit: Unit
 			timeline.append(entry)
 
 	return timeline
+
+
+## 模拟 activating_unit 使用先发制人后的下回合排序（与 TurnManager._eff_init 一致，不持久修改）
+static func calculate_order_after_preempt(units: Array, activating_unit: Unit) -> Array:
+	if activating_unit == null:
+		return calculate_turn_order(units, true)
+	var saved_preempt: bool = activating_unit.preempt_active
+	var saved_bonus: int = activating_unit.preempt_initiative_bonus
+	var saved_stamina: int = activating_unit.stats.stamina if activating_unit.stats else 0
+	var stamina_cost: int = 20
+	if activating_unit.is_wearing_heavy_armor():
+		stamina_cost = int(20 * 1.6)
+	activating_unit.preempt_active = true
+	activating_unit.preempt_initiative_bonus = 40
+	if activating_unit.stats:
+		activating_unit.stats.stamina = maxi(0, activating_unit.stats.stamina - stamina_cost)
+	var ordered: Array = calculate_turn_order(units, true)
+	activating_unit.preempt_active = saved_preempt
+	activating_unit.preempt_initiative_bonus = saved_bonus
+	if activating_unit.stats:
+		activating_unit.stats.stamina = saved_stamina
+	return ordered
 
 
 # ────────────────────────────────────────────────────────────
@@ -180,13 +199,13 @@ static func _test_pure_init_ordering() -> bool:
 	var unit_a: Unit = Unit.new()
 	unit_a.stats = Stats.new()
 	unit_a.stats.base_initiative = 100
-	unit_a.stats.fatigue = 0
+	unit_a.stats.stamina = unit_a.stats.max_stamina
 	unit_a.stats.max_stamina = 100
 
 	var unit_b: Unit = Unit.new()
 	unit_b.stats = Stats.new()
 	unit_b.stats.base_initiative = 50
-	unit_b.stats.fatigue = 0
+	unit_b.stats.stamina = unit_b.stats.max_stamina
 	unit_b.stats.max_stamina = 100
 
 	var ordered: Array[Unit] = calculate_turn_order([unit_a, unit_b], true)
@@ -202,13 +221,13 @@ static func _test_fatigue_weighted_ordering() -> bool:
 	var unit_a: Unit = Unit.new()
 	unit_a.stats = Stats.new()
 	unit_a.stats.base_initiative = 100
-	unit_a.stats.fatigue = 0
+	unit_a.stats.stamina = unit_a.stats.max_stamina
 	unit_a.stats.max_stamina = 100
 
 	var unit_b: Unit = Unit.new()
 	unit_b.stats = Stats.new()
 	unit_b.stats.base_initiative = 97
-	unit_b.stats.fatigue = 50
+	unit_b.stats.stamina = max(0, unit_b.stats.max_stamina - 50)
 	unit_b.stats.max_stamina = 100
 
 	var ordered: Array[Unit] = calculate_turn_order([unit_a, unit_b], true)
@@ -226,19 +245,19 @@ static func _test_mixed_ordering() -> bool:
 	var unit_a: Unit = Unit.new()
 	unit_a.stats = Stats.new()
 	unit_a.stats.base_initiative = 100
-	unit_a.stats.fatigue = 0
+	unit_a.stats.stamina = unit_a.stats.max_stamina
 	unit_a.stats.max_stamina = 100
 
 	var unit_b: Unit = Unit.new()
 	unit_b.stats = Stats.new()
 	unit_b.stats.base_initiative = 99
-	unit_b.stats.fatigue = 0
+	unit_b.stats.stamina = unit_b.stats.max_stamina
 	unit_b.stats.max_stamina = 100
 
 	var unit_c: Unit = Unit.new()
 	unit_c.stats = Stats.new()
 	unit_c.stats.base_initiative = 50
-	unit_c.stats.fatigue = 0
+	unit_c.stats.stamina = unit_c.stats.max_stamina
 	unit_c.stats.max_stamina = 100
 
 	var ordered: Array[Unit] = calculate_turn_order([unit_c, unit_a, unit_b], true)
@@ -250,13 +269,13 @@ static func _test_timeline_generation() -> bool:
 	var unit_a: Unit = Unit.new()
 	unit_a.stats = Stats.new()
 	unit_a.stats.base_initiative = 100
-	unit_a.stats.fatigue = 0
+	unit_a.stats.stamina = unit_a.stats.max_stamina
 	unit_a.stats.max_stamina = 100
 
 	var unit_b: Unit = Unit.new()
 	unit_b.stats = Stats.new()
 	unit_b.stats.base_initiative = 50
-	unit_b.stats.fatigue = 0
+	unit_b.stats.stamina = unit_b.stats.max_stamina
 	unit_b.stats.max_stamina = 100
 
 	var timeline: Array = generate_timeline_preview([unit_a, unit_b], 0, 2)
@@ -287,13 +306,13 @@ static func _test_preempt_preview() -> bool:
 	var unit_a: Unit = Unit.new()
 	unit_a.stats = Stats.new()
 	unit_a.stats.base_initiative = 100
-	unit_a.stats.fatigue = 0
+	unit_a.stats.stamina = unit_a.stats.max_stamina
 	unit_a.stats.max_stamina = 100
 
 	var unit_b: Unit = Unit.new()
 	unit_b.stats = Stats.new()
 	unit_b.stats.base_initiative = 98
-	unit_b.stats.fatigue = 0
+	unit_b.stats.stamina = unit_b.stats.max_stamina
 	unit_b.stats.max_stamina = 100
 
 	# 获取虚拟预览（B +40 Initiative）

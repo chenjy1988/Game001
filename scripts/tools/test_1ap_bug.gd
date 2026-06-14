@@ -13,7 +13,7 @@ class TestUnit extends Unit:
 		stats.max_hp = max_hp
 		stats.wisdom = wisdom
 		stats.faction = 0
-		stats.init_runtime(0)
+		stats.init_runtime()
 
 		var db: Node = Engine.get_main_loop().get_root().get_node_or_null("WeaponArmorDB")
 		if weapon_id != "" and db != null:

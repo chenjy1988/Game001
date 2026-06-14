@@ -334,8 +334,8 @@ func _refresh_hud() -> void:
 	_hud_body_bar.max_value = max(1, s.max_body_armor);  _hud_body_bar.value = s.body_armor
 	_hud_body_value.text = "%d/%d" % [s.body_armor, s.max_body_armor]
 	_hud_fatigue_bar.max_value = max(1, s.max_stamina)
-	_hud_fatigue_bar.value = max(0, s.max_stamina - s.fatigue)
-	_hud_fatigue_value.text = "%d/%d" % [max(0, s.max_stamina - s.fatigue), s.max_stamina]
+	_hud_fatigue_bar.value = max(0, s.stamina)
+	_hud_fatigue_value.text = "%d/%d" % [max(0, s.stamina), s.max_stamina]
 	# AP：每点画一个钻石（满 ◆ / 空 ◇），无数字
 	var ap: int = s.ap
 	var max_ap: int = s.max_ap
@@ -433,10 +433,10 @@ func _rebuild_action_list() -> void:
 func _append_learned_skill_entries(u: Unit, ap: int) -> void:
 	var preempt_locked: bool = true
 	if u.stats and ap >= 1:
-		var fatigue_cost: int = 20
+		var stamina_cost: int = 20
 		if u.is_wearing_heavy_armor():
-			fatigue_cost = int(20 * 1.6)
-		preempt_locked = (u.stats.fatigue + fatigue_cost > u.stats.max_stamina)
+			stamina_cost = int(20 * 1.6)
+		preempt_locked = (u.stats.stamina < stamina_cost)
 	_action_list.append({
 		"id": "preempt",
 		"label": "先",
@@ -516,10 +516,10 @@ func _refresh_action_states() -> void:
 		elif act["kind"] == KIND_SKILL:
 			match act["id"]:
 				"preempt":
-					var fatigue_cost: int = 20
+					var stamina_cost: int = 20
 					if u.is_wearing_heavy_armor():
-						fatigue_cost = int(20 * 1.6)
-					locked = not u.stats or ap < 1 or (u.stats.fatigue + fatigue_cost > u.stats.max_stamina)
+						stamina_cost = int(20 * 1.6)
+					locked = not u.stats or ap < 1 or (u.stats.stamina < stamina_cost)
 				"breath_regulation":
 					locked = not u.can_use_breath_regulation()
 				_:
@@ -558,12 +558,12 @@ func _refresh_unit_info() -> void:
 	_body_bar.max_value = max(1, s.max_body_armor);  _body_bar.value = s.body_armor
 	_body_value.text = "%d/%d" % [s.body_armor, s.max_body_armor]
 	_fatigue_bar.max_value = max(1, s.max_stamina)
-	_fatigue_bar.value = max(0, s.max_stamina - s.fatigue)
-	_fatigue_value.text = "%d/%d" % [max(0, s.max_stamina - s.fatigue), s.max_stamina]
+	_fatigue_bar.value = max(0, s.stamina)
+	_fatigue_value.text = "%d/%d" % [max(0, s.stamina), s.max_stamina]
 	var aw: int = _current_unit.armor.weight if _current_unit.armor else 0
 	var ww: int = _current_unit.weapon.weight if _current_unit.weapon else 0
 	var eff_init: int = s.effective_initiative(aw, ww)
-	_speed_label.text = "速度 %d (基础 %d − 疲劳 %d)" % [eff_init, s.base_initiative, s.fatigue]
+	_speed_label.text = "速度 %d (基础 %d − 已耗 %d)" % [eff_init, s.base_initiative, s.stamina_spent()]
 	if _current_unit.weapon != null:
 		var w: WeaponData = _current_unit.weapon
 		var modes: String = ",".join(w.attack_modes) if not w.attack_modes.is_empty() else w.damage_type

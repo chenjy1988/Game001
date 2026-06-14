@@ -26,7 +26,7 @@ class TestUnit extends Unit:
 		stats.max_ap = max_ap
 		stats.max_hp = 60
 		stats.faction = faction_id
-		stats.init_runtime(0)
+		stats.init_runtime()
 	# 不直接重写 start_turn（inner class 多态在 GDScript 里偶尔不可靠），
 	# 用独立的辅助方法 + 信号计数代替
 	func bump_start_count() -> void:
@@ -146,8 +146,11 @@ func _t3_wait_to_tail() -> void:
 	tm.start_battle()
 
 	_expect(_name(tm.get_current_unit()) == "A", "起始当前应是 A")
+	_expect(ua.stats.stamina_spent() == 0, "等待前已耗气力应为 0")
 	var ok: bool = tm.wait_current()
 	_expect(ok, "wait_current 应返回 true")
+	_expect(ua.stats.stamina_spent() == TurnManager.WAIT_STAMINA_COST,
+		"首次等待应消耗 %d 气力，实际 %d" % [TurnManager.WAIT_STAMINA_COST, ua.stats.stamina_spent()])
 	_expect(_name(tm.get_current_unit()) == "B", "wait 后当前应为 B，实际 %s" % _name(tm.get_current_unit()))
 	tm.get_current_unit().end_turn()  # B
 	_expect(_name(tm.get_current_unit()) == "C", "B 完后应是 C，实际 %s" % _name(tm.get_current_unit()))

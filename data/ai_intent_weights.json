@@ -1,0 +1,72 @@
+{
+	"_comment": "AI 意图权重表（5 维：attack/defend/support/reposition/retreat）",
+	"_version": "v0.1-phase2.5",
+	"_note": "权重表 = 职业基线 × 武器修饰 × 阵营修饰 × 状态/局面修正。详见 design/ai-decision-logic.md §二",
+
+	"jobs": {
+		"_default": { "attack": 1.0, "defend": 1.0, "support": 0.5, "reposition": 0.5, "retreat": 0.4 },
+
+		"tiaodang":    { "attack": 1.4, "defend": 1.0, "support": 0.4, "reposition": 0.6, "retreat": 0.2 },
+		"qiangbing":   { "attack": 1.0, "defend": 1.5, "support": 0.4, "reposition": 0.5, "retreat": 0.2 },
+		"qibing":      { "attack": 1.3, "defend": 0.7, "support": 0.3, "reposition": 0.9, "retreat": 0.5 },
+		"chihou":      { "attack": 0.9, "defend": 0.5, "support": 0.7, "reposition": 1.0, "retreat": 0.9 },
+
+		"modaoshou":   { "attack": 1.7, "defend": 0.8, "support": 0.2, "reposition": 0.5, "retreat": 0.1 },
+		"yaqinbing":   { "attack": 1.0, "defend": 1.6, "support": 0.9, "reposition": 0.5, "retreat": 0.2 },
+		"tieqi":       { "attack": 1.8, "defend": 0.7, "support": 0.2, "reposition": 1.2, "retreat": 0.1 },
+		"hanzu":       { "attack": 1.9, "defend": 0.3, "support": 0.1, "reposition": 0.4, "retreat": 0.1 },
+		"youxia":      { "attack": 1.5, "defend": 0.9, "support": 0.3, "reposition": 1.1, "retreat": 0.6 },
+		"sengbing":    { "attack": 1.1, "defend": 1.4, "support": 0.9, "reposition": 0.6, "retreat": 0.3 },
+
+		"nushou":      { "attack": 1.5, "defend": 0.9, "support": 0.2, "reposition": 0.7, "retreat": 0.8 },
+		"qingqi":      { "attack": 1.4, "defend": 0.5, "support": 0.3, "reposition": 1.4, "retreat": 1.0 },
+		"fanqi":       { "attack": 1.5, "defend": 0.4, "support": 0.3, "reposition": 1.3, "retreat": 1.1 },
+		"youyi":       { "attack": 1.2, "defend": 0.7, "support": 0.8, "reposition": 1.1, "retreat": 0.7 },
+
+		"yuhou":       { "attack": 0.8, "defend": 1.1, "support": 1.5, "reposition": 0.5, "retreat": 0.3 },
+		"shijianxian": { "attack": 1.4, "defend": 0.5, "support": 0.9, "reposition": 1.0, "retreat": 0.4 },
+		"fangshi":     { "attack": 0.6, "defend": 0.7, "support": 1.6, "reposition": 0.7, "retreat": 0.5 },
+		"buliangren":  { "attack": 1.5, "defend": 0.4, "support": 0.4, "reposition": 1.3, "retreat": 0.8 }
+	},
+
+	"weapon_modifiers": {
+		"_note": "武器/装备类型对职业基线的二级修饰（武器 id 第一段或 weapon_type）",
+		"ranged_main":  { "attack": 1.0, "defend": 1.0, "support": 1.0, "reposition": 1.2, "retreat": 1.3 },
+		"two_handed":   { "attack": 1.2, "defend": 0.9, "support": 0.7, "reposition": 1.0, "retreat": 1.0 },
+		"shield":       { "attack": 0.95, "defend": 1.3, "support": 1.2, "reposition": 1.0, "retreat": 1.0 },
+		"dagger":       { "attack": 1.15, "defend": 0.85, "support": 1.0, "reposition": 1.2, "retreat": 1.0 }
+	},
+
+	"factions": {
+		"_note": "阵营预设：disciplined / fanatic / rabble 等给己方所有单位再叠一层",
+		"_default":     { "attack": 1.0, "defend": 1.0, "support": 1.0, "reposition": 1.0, "retreat": 1.0 },
+		"bandit_band":  { "attack": 1.1, "defend": 1.0, "support": 0.6, "reposition": 1.0, "retreat": 1.3 },
+		"shuofang":     { "attack": 1.0, "defend": 1.2, "support": 1.3, "reposition": 1.0, "retreat": 1.0 },
+		"fanatic_cult": { "attack": 1.3, "defend": 0.7, "support": 0.5, "reposition": 0.9, "retreat": 0.3 },
+		"elite_guard":  { "attack": 1.0, "defend": 1.3, "support": 1.5, "reposition": 1.0, "retreat": 0.7 },
+		"rabble":       { "attack": 0.7, "defend": 1.0, "support": 0.7, "reposition": 0.9, "retreat": 1.5 }
+	},
+
+	"modifiers": {
+		"_note": "状态/局面/远程优势修正，叠乘到基线 × 武器 × 阵营 之后",
+
+		"hp_full":     { "attack": 1.0, "defend": 1.0, "support": 1.0, "reposition": 1.0, "retreat": 0.5 },
+		"hp_wounded":  { "attack": 0.85, "defend": 1.2, "support": 1.0, "reposition": 1.0, "retreat": 1.2 },
+		"hp_critical": { "attack": 0.5, "defend": 1.0, "support": 1.0, "reposition": 1.5, "retreat": 2.0 },
+
+		"armor_broken":   { "attack": 1.0, "defend": 0.7, "support": 1.0, "reposition": 1.0, "retreat": 1.4 },
+
+		"stamina_fatigued":  { "attack": 0.5, "defend": 1.0, "support": 0.6, "reposition": 1.0, "retreat": 1.3 },
+		"stamina_wavering":  { "attack": 0.85, "defend": 1.1, "support": 1.0, "reposition": 1.0, "retreat": 1.0 },
+
+		"ally_dying":      { "attack": 0.6, "defend": 1.0, "support": 2.0, "reposition": 1.0, "retreat": 1.0 },
+		"ally_surrounded": { "attack": 1.0, "defend": 1.0, "support": 1.5, "reposition": 1.3, "retreat": 1.0 },
+
+		"battle_collapsing": { "attack": 0.5, "defend": 1.0, "support": 1.0, "reposition": 1.0, "retreat": 1.8 },
+		"battle_pressured":  { "attack": 0.85, "defend": 1.2, "support": 1.0, "reposition": 1.0, "retreat": 1.0 },
+		"battle_dominant":   { "attack": 1.3, "defend": 0.7, "support": 1.0, "reposition": 1.0, "retreat": 0.7 },
+
+		"enemy_ranged_adv":  { "attack": 1.3, "defend": 0.5, "support": 1.0, "reposition": 1.4, "retreat": 1.0 },
+		"ally_ranged_adv":   { "attack": 0.7, "defend": 1.5, "support": 1.0, "reposition": 1.0, "retreat": 1.0 }
+	}
+}

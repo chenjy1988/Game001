@@ -56,6 +56,9 @@ func _load_jobs() -> void:
 		j.weapon_pool.clear()
 		for w in pool:
 			j.weapon_pool.append(str(w))
+		var ab_list = obj.get("abilities", [])
+		for ab_id in ab_list:
+			j.abilities.append(str(ab_id))
 		_jobs[j.id] = j
 
 

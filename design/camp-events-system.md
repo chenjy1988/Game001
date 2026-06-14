@@ -213,8 +213,9 @@
 | `class-system.md` §七 | 背景属性与 **事件 tag** SoT |
 | `personality-system.md` §三 | 性格列表与 **选项 tag** SoT |
 | `status-effects.md` §三 | 士气档位与开战偏移 |
-| `economy-system.md` §5.1 | 招募生成：背景 + 性格 + 天赋 |
-| `design.md` §人物培养 | 顶层索引 |
+| `economy-system.md` §5.1 | 招募生成：背景 + 性格 + 性别 + 属性天赋 + Trait |
+| `design.md` §系统功能想法 | 顶层索引 |
+| `camp-meta-systems.md` | NPC 培养（资源解锁能力 + 特色事件）；据点建造为远期设想 |
 
 ---
 

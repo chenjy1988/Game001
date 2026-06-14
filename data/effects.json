@@ -1,0 +1,38 @@
+{
+  "_doc": "CombatEffect 模板 — EffectDB.create_from_spec() 实例化",
+
+  "dazed": {
+    "display_name": "眩晕",
+    "order": 100,
+    "skip_turn": true,
+    "hit_pct": -0.30
+  },
+  "taunted": {
+    "display_name": "嘲讽",
+    "order": 50
+  },
+  "morale_up": {
+    "display_name": "士气上升",
+    "order": 10
+  },
+  "rooted": {
+    "display_name": "生根",
+    "order": 80,
+    "block_weapon_attack": false
+  },
+  "ignore_injury_debuffs": {
+    "display_name": "无视伤势",
+    "order": 5,
+    "turns": -1
+  },
+  "bleeding": {
+    "display_name": "流血",
+    "order": 90,
+    "is_stacking": true
+  },
+  "weakened": {
+    "display_name": "虚弱",
+    "order": 70,
+    "damage_mult": 0.85
+  }
+}

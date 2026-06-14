@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://test_ai_m0_headless"]
+
+[ext_resource type="Script" path="res://scripts/tools/test_ai_m0_scene.gd" id="1"]
+
+[node name="TestAIM0" type="Node"]
+script = ExtResource("1")

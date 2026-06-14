@@ -12,7 +12,8 @@
     "wisdom_range":  [25, 35],
     "max_ap": 9,
     "move_range": 4,
-    "weapon_pool": ["saber", "javelin", "bow"]
+    "weapon_pool": ["saber", "javelin", "bow"],
+    "abilities": ["yi_xing"]
   },
   {
     "id": "qiangbing",
@@ -27,7 +28,8 @@
     "wisdom_range":  [20, 30],
     "max_ap": 9,
     "move_range": 4,
-    "weapon_pool": ["saber", "javelin", "spear", "bow", "crossbow"]
+    "weapon_pool": ["saber", "javelin", "spear", "bow", "crossbow"],
+    "abilities": ["tui_zhuang", "chao_feng"]
   },
   {
     "id": "qibing",
@@ -42,7 +44,8 @@
     "wisdom_range":  [35, 45],
     "max_ap": 9,
     "move_range": 4,
-    "weapon_pool": ["saber", "javelin", "spear", "bow"]
+    "weapon_pool": ["saber", "javelin", "spear", "bow"],
+    "abilities": ["huan_wei", "yi_xing"]
   },
   {
     "id": "chihou",
@@ -57,6 +60,7 @@
     "wisdom_range":  [50, 60],
     "max_ap": 9,
     "move_range": 4,
-    "weapon_pool": ["dagger", "saber", "bow"]
+    "weapon_pool": ["dagger", "saber", "bow"],
+    "abilities": ["bao_za", "yi_xing"]
   }
 ]

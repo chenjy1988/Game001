@@ -98,7 +98,7 @@
 | 属性 | 含义 | 范围 | 备注 |
 |---|---|---|---|
 | **HP** | 生命值 | 40-150 | 0 死亡 / 受伤(0-30%) |
-| **Init** | 速度 → 回合顺序 + 身法加成因子 | 60-150 | DOS2 同款，受 weight 惩罚 |
+| **Init** | 速度 → 回合顺序；身轻如燕（JP 被动）折闪避 | 60-150 | DOS2 同款，受 weight 惩罚 |
 | **Melee** | 近战命中率（%）| 30-90 | 攻击者基础命中；也参与远程命中计算 |
 | **Ranged** | 远程命中率 — **已移除** | — | 由 `melee × 0.6 + bow_mastery` 派生（见下） |
 | **Stamina** | 气力 → 独立消耗属性 | 60-150 | 可升级加点；穿甲/行动消耗；影响命中和防御 |
@@ -109,8 +109,8 @@
 | **Move** | 移动力（职业基础值）| 3-6 | 不受 weight 修正 |
 
 **派生数值（自动计算 + UI 显示）**：
-- `Effective Init = base_init - floor(weight / 4)`
-- `Effective Defense = base_defense + dodge_bonus`（身法加成，见下）
+- `Effective Init = base_init - floor(weight / 4)`（回合顺序；**命中闪避不用此值**）
+- 命中 / 防御合成见 **[weapon-system.md §6.1.1](weapon-system.md)**（`final_def` + 一次掷骰）
 - `Ranged Skill = melee_skill × 0.6 + bow_mastery`（bow_mastery 来自职业/JP）
 - `weight_mult = 1 + weight × 0.02`（所有气力消耗的重量系数）
 
@@ -186,8 +186,8 @@
 | 剩余气力比例 | 状态 | 命中惩罚 | 防御惩罚 | 伤害系数 |
 |---|---|---|---|---|
 | >50% | 正常 | 无 | 无 | ×1.0 |
-| 20%-50% | 疲劳 | Hit -5 | Defense -5 | random(0.80, 0.90) |
-| 0%-20% | 低气力 / 力竭 | Hit -10 | Defense -10 | random(0.70, 0.80) |
+| 20%-50% | 疲劳 | Hit -10 | Defense -5 | random(0.80, 0.90) |
+| 0%-20% | 低气力 / 力竭 | Hit -20 | Defense -10 | random(0.70, 0.80) |
 
 **关键设计**：
 - 气力 = 0 时仍可普攻和移动，AP 完全不受影响
@@ -202,22 +202,28 @@
 - 重甲坦克：7-8 回合进入重度疲劳，防御开始崩塌
 - 典型战斗在力竭普遍发生前结束，但长线战有气力压力
 
-### 四、身法（Dodge Perk）
+### 四、身轻如燕（JP 被动 / 技能点，旧称「身法」）
 
-**触发条件（全部满足）**：
-1. 拥有"身法" Trait
-2. `weight ≤ 12`（轻装限制）
-3. `stamina > 0`（力竭失效）
+> **实现 SoT**：[weapon-system.md §6.1.1](weapon-system.md) · 代码：`Unit.nimble_body_active` → `Stats.nimble_dodge_pts()`  
+> **与先天天赋区分**：每名单位仅 **1～2 个先天 Trait**（招募 roll，`traits.json`）。身轻如燕属 **JP 投资解锁**的通用被动（见 `class-system.md` §六），**不是** Trait。
 
-**加成公式**：
+**默认**：所有单位 **无被动闪避**（`dodge_pts = 0`），除非已解锁 JP 被动或技能写明 +N。
+
+**身轻如燕**（JP 节点；Phase 3 走职业/通用 Perk 树；Demo 用 `nimble_body_active` 表「已点该节点」）：
+
 ```
-dodge_bonus = init × 0.15 × √(current_ap / max_ap)
+敏捷余量 = base_initiative − 全身重量（武器 + 甲 + 盾 …）
+dodge_pts = max(0, 敏捷余量) × 20%    // 1:1 计入守方 final_def
 ```
-- 加到 `effective_defense` 上，参与减法制命中计算
-- AP 越低加成越少：1/9 AP 时加成降至 1/3（√(1/9) = 1/3）
-- 瞬时 AP 决定，行动后 dodge_bonus 立刻下降
 
-**设计意图**：轻兵高速单位的生存保障，BB 的 Dodge 技能简化版。AP 约束保证不能"闪着打满输出"。
+| 例 | init | 全身重 | dodge_pts |
+|----|------|--------|-----------|
+| 刺客 | 100 | 18 | **16.4** |
+| 重甲 | 60 | 45 | **3.0** |
+
+技能 flat「+N 闪避」走 `stats.dodge_bonus`，与 JP 被动叠加以进 `dodge_pts`。
+
+**设计意图**：init 与负重同一量纲相减——越快、越轻，闪避越高；重甲通过**更大的全身重量**自然压闪避，无需额外甲罚门槛。
 
 ### 五、武器系统（摘要，详见 [design/weapon-system.md](design/weapon-system.md)）
 
@@ -330,38 +336,36 @@ if 暴击：multiplier += 0.5
 - 战术价值：杀重甲精英时**保留完整战利品装备**（Berwick 派经济核心）
 - 受反割草 cap 约束（damage_base × 2.0 = 56），通过 JP/词条/传说级武器逐步提升爆发上限
 
-### 六、命中率公式（BB 减法制 + 装备格挡，单层检定）
+### 六、命中率公式
+
+> **⚠️ 下文为历史草案。当前实现 SoT：[weapon-system.md §6.1.1](weapon-system.md)**（v3.2，2026-06-12）  
+> 代码：`DamageSystem.compute_defense_breakdown` / `calculate_hit_chance` / `execute_attack`
+
+**现行摘要**：
 
 ```
-Step 0：计算攻防核心数值
-  attacker_hit = melee_skill（或 ranged_skill = melee × 0.6 + bow_mastery）
-  eff_def = base_defense + dodge_bonus（身法加成，条件满足时）
+block_pts = 配盾→仅盾.block；双持→主+副 weapon.block 之和；否则→主手 block（与 defense 无关）
+dodge_pts = 默认 0；身轻如燕→max(0, init−全身重)×20%；技能 +N flat
 
-  // 气力惩罚（只影响成功率，不影响AP）
-  if stamina_ratio ≤ 0.20:  eff_def = floor(eff_def × 0.5)
-  if stamina_ratio ≤ 0.20:  attacker_hit -= 10（若防守方力竭则无此加成，这是攻方自己的惩罚）
-  if 0.20 < stamina_ratio ≤ 0.50:
-    eff_def -= 3（防守方轻度疲劳，防御略降）
-    attacker_hit -= 5（攻方轻度疲劳）
+final_def = 高防惩罚(base_def + dodge_pts + block_pts + def_flat) × def_mult
+Hit%      = clamp((atk_skill − final_def)/100 + hit_bonus, 5%, 95%)
+一次 roll；未中按 block_pts:dodge_pts 在 miss 带内归因（不二次检定）
+```
 
-Step 1：命中检定（减法制）
-  Hit% = attacker_hit
-       - eff_def
-       + 围攻奖励（每多一友军威胁目标 +5%，最多 +20%）
-       + 高地修正（高 +10% / 低 -10%）
-       + 距离修正
-       + 攻击模式修正（瞄头 / 全力一击）
-       + 士气修正（振奋 +10% / 动摇 -10% / 惊惧 -15% / 崩溃 -25%；防御见 status-effects.md §三）
-       + 夹击成立 +5%
-       + 气力惩罚修正（见 Step 0）
+气力档 flat（守方 def_flat −5/−10、攻方 hit_pct −10%/−20%）已接入 `CombatModifier`。
 
-  if Hit% ≤ 0 → MISS
-  if Hit% ≥ 100 → 必定命中
+---
 
-  // 格挡检定（独立于命中减法）
-  block_chance = weapon.block_value + shield_bonus
-  if 有盾: block_chance += 25
-  if rand(0,100) < block_chance → BLOCK（"格挡"，伤害归零，UI 区分）
+<details>
+<summary>历史草案（勿作实现依据）</summary>
+
+```
+Step 0：计算攻防核心数值（已废弃）
+  eff_def = base_defense + dodge_bonus …
+
+Step 1：命中检定（已废弃）
+  Hit% = attacker_hit - eff_def - dodge% - block% …
+  block_chance = weapon.block_value + shield（独立检定，已废弃）
 
 Step 2：部位检定
   普攻 → body
@@ -371,11 +375,11 @@ Step 3：伤害分流
   按武器类型 vs 护甲材质（slash/pierce/crush × 板甲/锁甲/皮甲）
 ```
 
-**与旧版核心区别**：
-- ~~乘法双层 Dodge% / Block%~~ → 减法制 `Hit% - eff_def`
-- Block 不再是命中率乘法，而是独立概率检定（装备驱动，非属性驱动）
-- Defense 只参与减法制，不再同时出现在 Dodge 和 Block 两个公式
-- 气力惩罚直接修改 eff_def 和 attacker_hit，不引入新乘法层
+**与旧版核心区别**（历史）：
+- ~~乘法双层 Dodge% / Block%~~ → v3.2 改为 `final_def` 一次合成
+- ~~Block 独立检定~~ → 格挡进 `block_pts`，miss 时视觉归因
+
+</details>
 
 ### 七、伤害设计红线（反割草，硬约束）
 
@@ -598,7 +602,7 @@ Step 3：伤害分流
 玩家想做"弓箭手 build"完全可行，但**不是通过职业身份**：
 - 选基础职业（奇兵 / 斥候 / 游侠 / 跳荡 等）
 - 装备步弓为主武器
-- 投资 **bow_mastery 通用天赋**（详见辅助技能池）
+- 投资 **bow_mastery 通用 JP 被动**（详见辅助技能池）
 - 高 init + 高 melee + 满 bow_mastery → 准头堪比专业
 - 战术体验：节奏快（无上弦）、伤害低（25-40）、机动性强 → 与弩手"节奏慢、伤害高、阵列站定"完全不同
 
@@ -622,7 +626,7 @@ Step 3：伤害分流
 
 ### 三、人物背景（不是职业，是出身）
 
-民族 / 区域 / 出身作为**人物背景**而非职业，与战斗职业完全解耦。每个角色 1 个背景，影响属性、外观、**可触发的营地随机事件**（`camp-events-system.md`）；性格决定事件内回答选项；选项改隐藏好感度。职业可自由选择。详表见 `class-system.md` §七。
+民族 / 区域 / 出身作为**人物背景**而非职业，与战斗职业完全解耦。每个角色 1 个背景，影响属性、外观、**可触发的营地随机事件**（`camp-events-system.md`）；性格决定事件内回答选项；选项改隐藏好感度。**性别 + 属性天赋** + **成长模式**（固定 / 随机）：固定模式确定性成长、凹点对升级无效；随机模式按天赋倾向 roll、允许凹点（`class-system.md` §4.5.3）。职业可自由选择。详表见 `class-system.md` §七。
 
 | 背景 | 起始属性偏向 | 装备/外观 | 解锁内容 |
 |---|---|---|---|
@@ -649,11 +653,11 @@ Step 3：伤害分流
 | **侦察类** | 远视 / 伪装 / 捉生 / 听风 | 斥候 / 游奕都巡官 / 游侠 / 不良人 |
 | **军法类** | 督战 / 抗士气崩溃 / 处决威慑 | 虞候 / 押衙亲兵 |
 
-**通用天赋池（不限于辅助类）**：
-- **bow_mastery**：弓术专精，远程命中加成（非职业天赋，任何角色可投资）
-- **身法**：dodge 加成（仅 weight ≤ 12 时有效）
+**通用 JP 被动池（技能点，不限于辅助类）**——与先天天赋（每人 1～2 Trait）无关：
+- **bow_mastery**：弓术专精，远程命中加成（任何角色可投 JP）
+- **身轻如燕**（旧称身法）：`dodge_pts = max(0, init−全身重)×20%`（见 §四）
 - **双武器精通**：副手 +15 block + 双攻技能
-- 其他天赋（待 Phase 3 详定）
+- 其他 JP 被动（待 Phase 3 详定）
 
 → 通用技能池 + 主职业 + 副职业（FFT 系统）= build 自由度爆炸
 
@@ -718,19 +722,22 @@ Step 3：伤害分流
 - **敌方援军**：后期战斗无聊，敌方每回合随机出现 1-3 只援军
 
 ### 系统功能想法
-- 炼金系统
-- 锻造系统
-- 建设系统，城池建设？
-- 野兽掉落，提升收益，特殊掉落物低，用来制作装备、药水和道具
-- 商店系统
-- 指挥官系统：不同指挥官可以使用不同战场能力，例如战场视野、战场控制、战场干扰、战场治疗等
-- 提升战斗时治疗的效果，可以避免伤势的 debuff，但是取决于角色能力和天赋
-- 俘虏系统：可以俘虏敌人，然后可以使用俘虏获取赏金和道具，士气和血量越低，俘虏率越高
-- 职业系统：
-- 故事情节：？
-- 世界地图：是固定的还是随机的，这个取决于是要有故事情节
-- 人物培养：背景→事件池；性格→事件选项→好感度（`camp-events-system.md`）。**战术 AI 敌我同一套**（`ai-system.md`）；**性格不进 AI**，改攻击/击杀后结算（好色掉士气、贪财改掉落+笑声，`personality-system.md` v2.0）
-- 武器系统：去掉伤害穿透，那怎么解决护甲的问题
+
+**已记文档**（战略层 / Phase 4+）：
+
+| 系统 | 状态 | 文档 |
+|---|---|---|
+| **NPC 培养** | 已立项：花资源培养中后期 NPC → 解锁能力 + 特色事件 | [`design/camp-meta-systems.md`](design/camp-meta-systems.md) §二 |
+| **据点建造** | 远期设想，**可能不做**；若做则预设槽位简化版 | 同上 §三 |
+| 营地事件 / 好感 | 背景→事件池；性格→选项→好感 | [`design/camp-events-system.md`](design/camp-events-system.md) |
+| 人物战斗侧 | 性格结算钩子；战术 AI | `personality-system.md`、`ai-system.md` |
+
+**其它想法**（待单独立项）：
+
+- 炼金 / 锻造（与方士、铁匠后勤联动，`class-system.md` §八）
+- 野兽掉落、商店、指挥官战场能力、俘虏（`economy-system.md` 部分已写）
+- 世界地图固定 vs 随机（随主线规模定）
+- 武器护甲：见 `weapon-system.md` v3（已解决，非「去掉穿透」旧笔记）
 ---
 
 ## 已实施
@@ -771,7 +778,7 @@ Step 3：伤害分流
 
 ### AI
 
-- **新设计 SoT**：[design/ai-system.md](design/ai-system.md) —— BB 式三层架构（FactionBrain / AIAgent / Behavior）+ 效用分 + 加权随机（cutoff 0.25）；P0 敌人 AI，P1 我方托管（同引擎换 Profile）
+- **新设计 SoT**：[design/ai-system.md](design/ai-system.md) v1.2 —— 三层架构 + **§5.1 统一决策评估**（Attack/Move/Ability 同池净效用，非单技能特例）+ OA 三层；P0 敌人 AI，P1 我方托管
 - **倾向修正**：友军 **性格**（`personality_id`）/ 敌军 **战法倾向**（`disposition_id`），两套池子；见 [design/personality-system.md](design/personality-system.md)
 - 现状：`BattleAI.gd` 为旧版确定性评分器（枚举 可达格×目标），M2 验收后由新引擎替换（见 ai-system.md §十）
 

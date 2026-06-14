@@ -1,0 +1,135 @@
+{
+	"_comment": "AI 全局配置 —— 修改此文件即可调参，不改代码",
+	"_version": "v0.1-m0",
+
+	"action_loop": {
+		"max_actions_per_turn": 6,
+		"_note": "每回合单单位最多决策次数，防死循环"
+	},
+
+	"weighted_pick": {
+		"consider_cutoff": 0.25,
+		"consider_cutoff_chaotic": 0.40,
+		"min_pool_score": 3,
+		"deterministic": true,
+		"_note": "cutoff: top_score × cutoff 以下淘汰；min_pool_score: 低分垫底门槛；deterministic: true=永远选最高分"
+	},
+
+	"target_score": {
+		"weights": {
+			"hit": 0.35,
+			"damage": 0.25,
+			"low_hp": 0.40
+		},
+		"hit_power": 1.1,
+		"_note_hit_power": "hit_chance^hit_power：>1 惩罚低命中；=1 线性",
+		"multipliers": {
+			"kill": 3.0,
+			"ally_focus": 1.3,
+			"counter": 0.6,
+			"fleeing": 0.5,
+			"ranged": 1.25,
+			"forced_opponent": 1000
+		},
+		"_note_multipliers": "kill: 期望伤害≥剩余HP → ×3.0；ally_focus: 友方本回合打过该目标 → ×1.3；counter: 目标有反击 → ×0.6"
+	},
+
+	"engage_scoring": {
+		"candidate_cap": 60,
+		"_note_cap": "每决策最多评估的落点候选数",
+		"weights": {
+			"proximity": 1.0,
+			"flank": 0.3,
+			"ally_coord": 0.2,
+			"oa_cost": 0.5,
+			"end_threat": 0.4,
+			"surround": 0.85,
+			"terrain": 0.15
+		},
+		"defer_opportunity": {
+			"scale": 0.4,
+			"_note": "邻格残AP薄setup扣下回合满AP退+打机会成本；换打/斩杀豁免"
+		},
+		"oa_penalty": {
+			"armor_ref": 120,
+			"armor_strip_weight": 1.2,
+			"armor_break_bonus": 0.35,
+			"_note": "OA惩罚：①命中×冲击 ②己方护甲值缓冲 ③预期掉甲比；无轻/重甲分类"
+		},
+		"wait_resume_margin_mult": 1.5,
+		"_note_wait_margin": "已 Q 恢复后 thin Move 收手门槛 × 此系数"
+	},
+
+	"action_scoring": {
+		"_note": "统一净分：gross − surround − oa + self_state；I4 PlanGenerator 最终走 AIActionScorer",
+		"self_state": {
+			"hp_weight": 0.35,
+			"armor_weight": 0.25,
+			"stamina_weight": 0.15,
+			"already_surrounded": 0.20
+		},
+		"surround_cost": {
+			"min_adjacent": 2,
+			"per_new_adjacent_weight": 1.0,
+			"_note": "cost = Σ TargetScore(新邻敌→己) × utility_scale × weight"
+		}
+	},
+
+	"behavior_baseline": {
+		"advance": 35,
+		"engage": 20,
+		"attack": 130,
+		"wait": 35,
+		"defend": 50,
+		"flee": 9000,
+		"retreat": 60,
+		"disengage": 55,
+		"idle": 1,
+		"breath": 280,
+		"preempt": 25,
+		"_note": "Wait/Defend 为 situation 基线；Attack 实际分 = TargetScore × attack_opportunity.utility_scale"
+	},
+
+	"attack_opportunity": {
+		"utility_scale": 100,
+		"weight": 1.0,
+		"hold_stance_bonus": 40,
+		"ap_hold_weight": 1.0,
+		"_note": "Wait/Defend 扣 attack 机会成本 + 握 AP 不花的 best_ap_spend 效用"
+	},
+
+	"breath_regulation": {
+		"stamina_remaining_threshold": 0.20,
+		"recovery_utility_scale": 120,
+		"min_kill_hit_chance": 0.20,
+		"attack_opportunity_weight": 1.0,
+		"_note": "吐纳分 = (恢复气力/max)×scale − 攻击机会成本；仅击杀机会硬拦"
+	},
+
+	"preempt": {
+		"utility_per_enemy_beaten": 95,
+		"slot_gain_scale": 12,
+		"_note": "残 AP 抢相邻敌下回合先手；仅当虚拟排序能超车至少 1 名相邻敌"
+	},
+
+	"ranged_tactics": {
+		"enemy_advantage": { "engage_mult": 1.3, "wait_mult": 0.3 },
+		"ally_advantage":  { "engage_mult": 0.7, "wait_mult": 2.0 },
+		"_note": "敌远程占优→急冲(engage×1.3, wait×0.3)；我远程占优→缓进保持施压(engage×0.7, wait×2.0)"
+	},
+
+	"debug": {
+		"log_decisions": true,
+		"_note": "true 时 AI 每次决策打印 [AI] 单位 [archetype×disposition] → 候选行为与分数"
+	},
+
+	"ability_priority_baseline": {
+		"kill": 200,
+		"armor_break": 160,
+		"debuff": 120,
+		"buff": 80,
+		"positioning": 60,
+		"default": 100,
+		"_note": "能力 AI 提示优先级基础分；实际分 × TargetScore 因子"
+	}
+}

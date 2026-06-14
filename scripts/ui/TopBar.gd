@@ -21,7 +21,7 @@ class PortraitItem extends Control:
 	static func _fatigue_tier_color(u: Unit) -> Color:
 		if u == null or u.stats == null:
 			return Color(0.5, 0.5, 0.5)
-		var vigor: float = 1.0 - u.get_fatigue_ratio()
+		var vigor: float = u.get_stamina_ratio()
 		if vigor >= 0.75:
 			return Color(0.35, 0.85, 0.45)
 		if vigor >= 0.50:
@@ -36,10 +36,20 @@ class PortraitItem extends Control:
 		var n: String = u.job.display_name
 		return n.substr(0, mini(2, n.length()))
 
+	static func _portrait_tooltip(u: Unit) -> String:
+		if u == null or u.stats == null:
+			return ""
+		var s: Stats = u.stats
+		var crit_pct: int = int(round(DamageSystem.calculate_crit_chance(u) * 100.0))
+		var job: String = u.job.display_name if u.job != null else ""
+		var line2: String = ("%s · 智识 %d" % [job, s.wisdom]) if job != "" else "智识 %d" % s.wisdom
+		return "%s\n%s\n暴击 %d%%" % [s.unit_name, line2, crit_pct]
+
 	func _init(u: Unit) -> void:
 		unit = u
 		custom_minimum_size = SIZE_NORMAL
 		mouse_filter = MOUSE_FILTER_STOP
+		tooltip_text = _portrait_tooltip(u)
 
 		# 1. 敌友区分边框（取代直接对头像染色，保持头像色彩纯正）
 		# 友方采用清澈的战术蓝，敌方采用醒目的战术红

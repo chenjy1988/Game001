@@ -2,6 +2,31 @@ extends Node2D
 class_name Unit
 
 const _CombatModifier = preload("res://scripts/core/CombatModifier.gd")
+const _ShieldData = preload("res://scripts/core/ShieldData.gd")
+const _Stats = preload("res://scripts/core/Stats.gd")
+const _WeaponData = preload("res://scripts/core/WeaponData.gd")
+const _ArmorData = preload("res://scripts/core/ArmorData.gd")
+const _HexGrid = preload("res://scripts/core/HexGrid.gd")
+const _HexCoord = preload("res://scripts/core/HexCoord.gd")
+const _DamageSystem = preload("res://scripts/core/DamageSystem.gd")
+const _PaletteScript = preload("res://scripts/ui/CombatPalette.gd")
+const _AbilityEffectSpec = preload("res://scripts/core/abilities/AbilityEffectSpec.gd")
+const _CombatEffectContainer = preload("res://scripts/core/CombatEffectContainer.gd")
+const _EffectDB = preload("res://scripts/core/EffectDB.gd")
+const _EffectiveCombatStats = preload("res://scripts/core/EffectiveCombatStats.gd")
+
+static var _palette_fallback: Node = null
+
+
+static func _palette() -> Node:
+	var tree := Engine.get_main_loop()
+	if tree is SceneTree:
+		var node: Node = tree.root.get_node_or_null("CombatPalette")
+		if node:
+			return node
+	if _palette_fallback == null:
+		_palette_fallback = _PaletteScript.new()
+	return _palette_fallback
 ##
 ## Unit.gd — 战场单位
 ##
@@ -15,14 +40,36 @@ signal moved(unit, from_axial, to_axial)   ## 单位完成一次移动
 signal attacked(unit, target, result)      ## 单位完成一次攻击
 signal stats_changed(unit)                 ## 属性变化（用于 UI 刷新）
 
-@export var stats: Stats
-@export var weapon: WeaponData
-@export var armor: ArmorData
+@export var stats: _Stats
+@export var weapon: _WeaponData
+@export var armor: _ArmorData
+## 副手盾牌：配盾时 block_pts 仅取 shield.block_value，主手武器 block 不计
+var shield: _ShieldData = null
+## 副手武器（双持）：与主手 block_value 相加；与 shield 互斥
+var offhand_weapon: _WeaponData = null
 var job = null       ## JobClass 实例，由 BattleScene spawn 时从 JobDB 注入
+var _effect_container = null
+## AI 战术（ai-system §七；性格不进 AI）
+var ai_archetype_id: String = "infantry"
+var ai_disposition_id: String = "default"
+## 战斗背包槽（Phase 3 接 InventoryDB）；元素为 Dictionary：{id, name, label, tooltip, ...}
+var inventory: Array = []
 
 # ──── 先发制人技能相关（G2） ────
 var preempt_active: bool = false            ## 先发制人是否激活
 var preempt_initiative_bonus: int = 0       ## 先发制人 +Init 值（通常 +40）
+
+# ──── JP 被动占位（身轻如燕；Phase 3 由 Perk/JP 树注入，非 TraitDB）────
+## 身轻如燕（JP 技能点）：(base_init − 全身重量)×20% → dodge_pts
+var nimble_body_active: bool = false
+
+# ──── 被动技能（PassiveEffect 系统，Phase 2.5 P1）────
+## 已学被动技能 id 列表
+var passives: PackedStringArray = PackedStringArray()
+
+# ──── 跨职业心智负载（§十二 本职记忆与旧艺负载）────
+## 挂载的旧职技能 id 列表；本职技能负载待定（当前 weight=0 占位）
+var inherited_skills: PackedStringArray = PackedStringArray()
 
 # ──── 移动技能标志 ────
 var ignore_oa_this_move: bool = false       ## 本次移动无视借机攻击（滑步技能激活时设为 true，移动结束后自动清除）
@@ -30,18 +77,28 @@ var ignore_oa_this_move: bool = false       ## 本次移动无视借机攻击（
 const BREATH_AP_COST: int = 9               ## class-system.md §5.4：吐纳调息
 
 var axial_pos: Vector2i = Vector2i.ZERO
-var hex_grid: HexGrid = null               ## 由 BattleScene 注入
+var hex_grid: _HexGrid = null               ## 由 BattleScene 注入
 var _registered_at_pos: bool = true         ## self 是否在 _occupants[axial_pos] 中（穿过友方格子时暂不注册）
 var facing_dir: int = 0                    ## 面朝六方向；开战初始化 + 每次移动/攻击后更新，夹击判定用
 
 const MOVE_SPEED_PX_PER_SEC: float = 220.0
-const FATIGUE_PER_HEX: int = 3             ## 每移动 1 hex 消耗的疲劳
+## design.md §三：ceil(base × weight_mult)
+func action_stamina_cost(base: int) -> int:
+	return _DamageSystem.calculate_action_stamina_cost(self, base)
+
+
+func move_stamina_per_hex() -> int:
+	return action_stamina_cost(_DamageSystem.MOVE_STAMINA_BASE)
+
+
+## [DEPRECATED] 请用 move_stamina_per_hex()；旧固定值，未计 weight_mult
+const STAMINA_PER_HEX: int = 3
 const AP_PER_HEX: int = 2                  ## 每移动 1 hex 消耗的 AP（战兄弟标准节奏）
 
 
 func _ready() -> void:
 	if stats:
-		stats.init_runtime(armor.weight if armor else 0)
+		stats.init_runtime()
 	_try_load_sprite()
 
 
@@ -138,6 +195,14 @@ func get_faction() -> int:
 	return stats.faction if stats else 0
 
 
+func get_ai_archetype_id() -> String:
+	return ai_archetype_id
+
+
+func get_ai_disposition_id() -> String:
+	return ai_disposition_id
+
+
 func get_unit_name() -> String:
 	return stats.unit_name if stats else "?"
 
@@ -166,18 +231,174 @@ func get_weapon_ap_cost() -> int:
 	return cost
 
 
-## 当前激活 debuff（气力档 + 手拙等），战斗修正与 UI 状态栏共用此列表
+## 当前激活 debuff（气力档 + 手拙 + 激活的被动），战斗修正与 UI 状态栏共用此列表
 func get_active_debuffs() -> Array:
 	if not stats:
 		return []
 	var debuffs: Array = [_CombatModifier.stamina_tier_for(stats)]
 	if has_unfamiliar_weapon():
 		debuffs.append(_CombatModifier.clumsy())
+	# fold active passives
+	for p in get_active_passives({}):
+		debuffs.append(p.to_combat_modifier())
 	return debuffs
+
+
+# ──── 被动技能管理 ────
+
+const _PassiveLibrary = preload("res://scripts/core/passives/PassiveLibrary.gd")
+
+
+func has_passive(passive_id: String) -> bool:
+	return passive_id in passives
+
+
+func add_passive(passive_id: String) -> void:
+	if has_passive(passive_id):
+		return
+	passives.append(passive_id)
+	_resolve_passive_mutex(passive_id)
+
+
+func remove_passive(passive_id: String) -> void:
+	var idx: int = passives.find(passive_id)
+	if idx >= 0:
+		passives.remove_at(idx)
+
+
+## 当前激活的 PassiveEffect 列表（含条件判定，不含 triggered 类）
+func get_active_passives(context: Dictionary = {}) -> Array:
+	var result: Array = []
+	for pid in passives:
+		var p = _PassiveLibrary.get_by_id(pid)
+		if p == null: continue
+		if p.kind == "triggered": continue
+		if p.is_active(self, context):
+			result.append(p)
+	return result
+
+
+func _resolve_passive_mutex(new_pid: String) -> void:
+	var p = _PassiveLibrary.get_by_id(new_pid)
+	if p == null: return
+	for mid in p.mutex_with:
+		remove_passive(String(mid))
+
+
+# ──── 跨职业心智负载管理 ────
+
+const _AbilityLibraryBw = preload("res://scripts/core/AbilityLibrary.gd")
+
+
+## 获取当前 Wisdom（取 stats.wisdom，无则回退 30）
+func get_wisdom() -> int:
+	if stats != null and "wisdom" in stats:
+		return max(0, int(stats.wisdom))
+	return 30
+
+
+## 当前已使用的跨职业继承带宽
+func get_inherited_bandwidth_used() -> int:
+	var total: int = 0
+	for sid in inherited_skills:
+		var ab = _AbilityLibraryBw.get_by_id(sid)
+		if ab != null:
+			total += int(ab.weight)
+	return total
+
+
+## 剩余带宽
+func get_bandwidth_remaining() -> int:
+	return max(0, get_wisdom() - get_inherited_bandwidth_used())
+
+
+## 是否可以挂载指定跨职业技能
+func can_equip_inherited_skill(skill_id: String) -> bool:
+	var ab = _AbilityLibraryBw.get_by_id(skill_id)
+	if ab == null: return false
+	if ab.weight <= 0: return true  # 0 重量 = 当前本职技能，无带宽消耗
+	return get_inherited_bandwidth_used() + int(ab.weight) <= get_wisdom()
+
+
+## 执行挂载（返回是否成功）
+func equip_inherited_skill(skill_id: String) -> bool:
+	if not can_equip_inherited_skill(skill_id):
+		return false
+	if not (skill_id in inherited_skills):
+		inherited_skills.append(skill_id)
+	return true
+
+
+## 卸下继承技能（释放带宽）
+func unequip_inherited_skill(skill_id: String) -> void:
+	var idx: int = inherited_skills.find(skill_id)
+	if idx >= 0:
+		inherited_skills.remove_at(idx)
 
 
 func get_combat_modifiers() -> Array:
 	return get_active_debuffs()
+
+
+## 守方防御修正列表（buff/debuff/士气；I0 后扩展 CombatEffect）
+func get_defense_modifiers() -> Array:
+	return get_active_debuffs()
+
+
+## 士气防御 % 加成（H2 stub：恒 0，乘算时 ×1.0）
+func get_morale_defense_pct() -> float:
+	return 0.0
+
+
+## Init 折闪避点（默认 0；已解锁身轻如燕 JP 被动时见 Stats.nimble_dodge_pts）
+func get_init_dodge_pts() -> float:
+	if not nimble_body_active or stats == null:
+		return 0.0
+	return _Stats.nimble_dodge_pts(stats.base_initiative, get_total_weight())
+
+
+## 装备提供的格挡点（§6.1.1）：配盾→仅盾；双持→主+副 block 之和；否则→主手 block
+func get_equipment_block_pts() -> int:
+	if shield != null:
+		return shield.block_value
+	var total: int = weapon.block_value if weapon else 0
+	if offhand_weapon != null and weapon != null and not weapon.two_handed:
+		total += offhand_weapon.block_value
+	return total
+
+
+## 能力施加的战斗效果 → CombatEffectContainer
+func apply_effect_spec(spec, source: Unit = null) -> bool:
+	if spec == null or not spec is _AbilityEffectSpec:
+		return false
+	if spec.target == null:
+		spec.target = self
+	if spec.source == null:
+		spec.source = source
+	var effect = _EffectDB.create_from_spec(spec)
+	if effect == null:
+		return false
+	get_effect_container().add(effect)
+	return true
+
+
+func get_effect_container():
+	if _effect_container == null:
+		_effect_container = _CombatEffectContainer.new(self)
+	return _effect_container
+
+func get_effective_stats():
+	return get_effect_container().get_effective()
+
+
+func get_job_ability_ids() -> Array:
+	if job == null:
+		return []
+	return job.abilities.duplicate()
+
+
+func get_status_effects_for_ui() -> Array:
+	return get_effect_container().query_ui()
 
 
 func is_alive() -> bool:
@@ -185,11 +406,16 @@ func is_alive() -> bool:
 
 
 # ──── 先发制人技能相关方法（G2） ────
-func get_fatigue_ratio() -> float:
-	## 返回气力百分比（0.0~1.0）
+func get_stamina_ratio() -> float:
+	## 返回剩余气力比例（0.0~1.0）
 	if not stats or stats.max_stamina <= 0:
 		return 0.0
-	return clamp(float(stats.fatigue) / float(stats.max_stamina), 0.0, 1.0)
+	return stats.stamina_ratio()
+
+
+func get_fatigue_ratio() -> float:
+	## [DEPRECATED] 旧名：返回已消耗气力比例；请改用 get_stamina_ratio()
+	return 1.0 - get_stamina_ratio()
 
 
 func is_wearing_heavy_armor() -> bool:
@@ -204,39 +430,58 @@ func get_total_weight() -> int:
 	if weapon:
 		if weapon.has_method("get") and "weight" in weapon:
 			total += int(weapon.weight)
-		elif weapon is WeaponData:
+		elif weapon is _WeaponData:
 			total += int(weapon.weight)
 	if armor:
 		if armor.has_method("get") and "weight" in armor:
 			total += int(armor.weight)
-		elif armor is ArmorData:
+		elif armor is _ArmorData:
 			total += int(armor.weight)
 	# TODO: 加上道具重量（当实装道具系统时）
 	return total
 
 
+func get_preempt_stamina_cost() -> int:
+	var stamina_cost: int = 20
+	if is_wearing_heavy_armor():
+		stamina_cost = int(20 * 1.6)
+	return stamina_cost
+
+
+func stamina_ratio_after_preempt() -> float:
+	if not stats or stats.max_stamina <= 0:
+		return 0.0
+	var after: int = maxi(0, stats.stamina - get_preempt_stamina_cost())
+	return float(after) / float(stats.max_stamina)
+
+
+func would_preempt_cause_exhaustion() -> bool:
+	## 使用后剩余气力 ≤20% → 力竭档（design/weapon-system.md §6.2）
+	return stamina_ratio_after_preempt() <= 0.2
+
+
+func can_use_ability_preempt() -> bool:
+	## 先发制人：1 AP + 20/32 气力；下回合 Init +40
+	if not stats or not is_alive():
+		return false
+	if preempt_active:
+		return false
+	if stats.ap < 1:
+		return false
+	var stamina_cost: int = get_preempt_stamina_cost()
+	return stats.stamina >= stamina_cost
+
+
 func use_ability_preempt() -> bool:
 	## 技能执行：扣 1 AP + 20/32 气力，设置先发制人激活
 	## 返回技能是否成功激活
-	if not stats or not is_alive():
+	if not can_use_ability_preempt():
 		return false
 
-	# 检查 AP
-	if stats.ap < 1:
-		return false
+	var stamina_cost: int = get_preempt_stamina_cost()
 
-	# 计算气力消耗
-	var fatigue_cost: int = 20
-	if is_wearing_heavy_armor():
-		fatigue_cost = int(20 * 1.6)  # = 32
-
-	# 检查气力是否足够（不能超过 max_stamina）
-	if stats.fatigue + fatigue_cost > stats.max_stamina:
-		return false
-
-	# 执行消耗
 	stats.spend_ap(1)
-	stats.add_fatigue(fatigue_cost)
+	stats.spend_stamina(stamina_cost)
 
 	# 激活先发制人加值
 	preempt_active = true
@@ -246,9 +491,14 @@ func use_ability_preempt() -> bool:
 	return true
 
 
+func breath_regulation_stamina() -> int:
+	## 吐纳调息恢复目标：剩余气力 = max_stamina − (甲+武器)总重
+	return maxi(0, stats.max_stamina - get_total_weight()) if stats else 0
+
+
 func breath_regulation_floor_fatigue() -> int:
-	## 吐纳调息恢复目标：气力恢复至 [上限 - (甲+武器)总重] → fatigue = 总重
-	return get_total_weight()
+	## [DEPRECATED] 旧 API；请改用 breath_regulation_stamina()
+	return breath_regulation_stamina()
 
 
 func can_use_breath_regulation() -> bool:
@@ -262,7 +512,7 @@ func use_ability_breath_regulation() -> bool:
 	if not can_use_breath_regulation():
 		return false
 	stats.spend_ap(BREATH_AP_COST)
-	stats.fatigue = breath_regulation_floor_fatigue()
+	stats.stamina = breath_regulation_stamina()
 	stats_changed.emit(self)
 	return true
 
@@ -273,14 +523,14 @@ func reset_turn_effects() -> void:
 	preempt_initiative_bonus = 0
 
 
-func place_at(axial: Vector2i, grid: HexGrid) -> void:
+func place_at(axial: Vector2i, grid: _HexGrid) -> void:
 	hex_grid = grid
 	var resolved: Vector2i = grid.find_nearest_standable(axial)
 	if resolved != axial:
 		var name_str: String = stats.unit_name if stats else "?"
 		push_warning("[Unit] %s 出生点 %s 不可站立，已移至 %s" % [name_str, axial, resolved])
 	axial_pos = resolved
-	position = HexCoord.axial_to_pixel(resolved, HexGrid.HEX_SIZE)
+	position = _HexCoord.axial_to_pixel(resolved, _HexGrid.HEX_SIZE)
 	hex_grid.set_occupant(resolved, self)
 
 
@@ -288,13 +538,17 @@ func place_at(axial: Vector2i, grid: HexGrid) -> void:
 func start_turn() -> void:
 	if not is_alive():
 		return
+	if has_meta("_ai_job_ability_used"):
+		remove_meta("_ai_job_ability_used")
 	reset_turn_effects()  # 清除上回合效果（先发制人 +Init）
+	get_effect_container().notify_turn_started()
 	stats.reset_ap()
 	# 气力不自动恢复（design.md § 三：没有自然恢复，每一点变化都来自玩家明确选择）
 	stats_changed.emit(self)
 
 
 func end_turn() -> void:
+	get_effect_container().notify_turn_ended()
 	action_completed.emit(self)
 
 
@@ -355,17 +609,16 @@ func _walk_single_step(step: Vector2i, from: Vector2i) -> bool:
 	if not ignore_oa_this_move:
 		leaving_ctrls = hex_grid.get_zoc_controllers(axial_pos, get_faction())
 	stats.spend_ap(AP_PER_HEX)
-	stats.add_fatigue(FATIGUE_PER_HEX)
+	stats.spend_stamina(move_stamina_per_hex())
 	var hit_blocked: bool = false
 	for ctrl in leaving_ctrls:
 		if not is_alive():
 			break
-		var oa_result: Dictionary = DamageSystem.execute_attack(ctrl, self)
+		var oa_result: Dictionary = _DamageSystem.execute_attack(ctrl, self)
 		oa_result["is_opportunity_attack"] = true
-		var def_fat: int = DamageSystem.calculate_defend_fatigue(self)
+		var def_fat: int = apply_defend_stamina_cost(self)
 		if def_fat > 0:
-			stats.add_fatigue(def_fat)
-			oa_result["defend_fatigue"] = def_fat
+			oa_result["defend_stamina"] = def_fat
 		_apply_attack_result(ctrl, self, oa_result)
 		ctrl.face_toward(axial_pos)
 		ctrl.attacked.emit(ctrl, self, oa_result)
@@ -379,7 +632,7 @@ func _walk_single_step(step: Vector2i, from: Vector2i) -> bool:
 		ignore_oa_this_move = false
 		stats_changed.emit(self)
 		return false
-	position = HexCoord.axial_to_pixel(step, HexGrid.HEX_SIZE)
+	position = _HexCoord.axial_to_pixel(step, _HexGrid.HEX_SIZE)
 	var step_occ = hex_grid.get_occupant(step)
 	if step_occ != null and step_occ != self and step_occ.is_alive() \
 			and step_occ.get_faction() != get_faction():
@@ -410,16 +663,15 @@ func _jump_along_path_sync(path: Array[Vector2i], from: Vector2i) -> void:
 	var dest_axial: Vector2i = path[-1]
 	var leaving_ctrls: Array = hex_grid.get_zoc_controllers(axial_pos, get_faction())
 	stats.spend_ap(AP_PER_HEX)
-	stats.add_fatigue(FATIGUE_PER_HEX)
+	stats.spend_stamina(move_stamina_per_hex())
 	for ctrl in leaving_ctrls:
 		if not is_alive():
 			break
-		var oa_result: Dictionary = DamageSystem.execute_attack(ctrl, self)
+		var oa_result: Dictionary = _DamageSystem.execute_attack(ctrl, self)
 		oa_result["is_opportunity_attack"] = true
-		var def_fat: int = DamageSystem.calculate_defend_fatigue(self)
+		var def_fat: int = apply_defend_stamina_cost(self)
 		if def_fat > 0:
-			stats.add_fatigue(def_fat)
-			oa_result["defend_fatigue"] = def_fat
+			oa_result["defend_stamina"] = def_fat
 		_apply_attack_result(ctrl, self, oa_result)
 		ctrl.face_toward(axial_pos)
 		ctrl.attacked.emit(ctrl, self, oa_result)
@@ -434,8 +686,8 @@ func _jump_along_path_sync(path: Array[Vector2i], from: Vector2i) -> void:
 		return
 	if path.size() > 1:
 		stats.spend_ap(AP_PER_HEX * (path.size() - 1))
-		stats.add_fatigue(FATIGUE_PER_HEX * (path.size() - 1))
-	position = HexCoord.axial_to_pixel(dest_axial, HexGrid.HEX_SIZE)
+		stats.spend_stamina(move_stamina_per_hex() * (path.size() - 1))
+	position = _HexCoord.axial_to_pixel(dest_axial, _HexGrid.HEX_SIZE)
 	if _registered_at_pos:
 		hex_grid.set_occupant(axial_pos, null)
 	hex_grid.set_occupant(dest_axial, self)
@@ -482,19 +734,18 @@ func _animate_path(path: Array[Vector2i]) -> void:
 		#    BB 原版规则：被借机攻击命中后，AP/疲劳"照扣"，不退还。
 		#    意义：闯 ZoC 是真实付出代价的博弈，不是免费试探。
 		stats.spend_ap(AP_PER_HEX)
-		stats.add_fatigue(FATIGUE_PER_HEX)
+		stats.spend_stamina(move_stamina_per_hex())
 
 		# 3) 借机攻击：命中即停，不再执行后续攻击者
 		var hit_blocked: bool = false
 		for ctrl in leaving_ctrls:
 			if not is_alive():
 				break
-			var oa_result: Dictionary = DamageSystem.execute_attack(ctrl, self)
+			var oa_result: Dictionary = _DamageSystem.execute_attack(ctrl, self)
 			oa_result["is_opportunity_attack"] = true
-			var def_fat: int = DamageSystem.calculate_defend_fatigue(self)
+			var def_fat: int = apply_defend_stamina_cost(self)
 			if def_fat > 0:
-				stats.add_fatigue(def_fat)
-				oa_result["defend_fatigue"] = def_fat
+				oa_result["defend_stamina"] = def_fat
 			_apply_attack_result(ctrl, self, oa_result)
 			ctrl.face_toward(axial_pos)
 			ctrl.attacked.emit(ctrl, self, oa_result)
@@ -513,7 +764,7 @@ func _animate_path(path: Array[Vector2i]) -> void:
 			return
 
 		# 4) tween 到下一格
-		var target_pos: Vector2 = HexCoord.axial_to_pixel(step, HexGrid.HEX_SIZE)
+		var target_pos: Vector2 = _HexCoord.axial_to_pixel(step, _HexGrid.HEX_SIZE)
 		var distance: float = position.distance_to(target_pos)
 		var duration: float = max(0.05, distance / MOVE_SPEED_PX_PER_SEC)
 		var tween := create_tween()
@@ -553,7 +804,7 @@ func _animate_path(path: Array[Vector2i]) -> void:
 		moved.emit(self, from, step)
 		from = step
 	# 临时调试：移动结束后核对 axial 与 sprite 像素位置是否一致
-	var expected_px: Vector2 = HexCoord.axial_to_pixel(axial_pos, HexGrid.HEX_SIZE)
+	var expected_px: Vector2 = _HexCoord.axial_to_pixel(axial_pos, _HexGrid.HEX_SIZE)
 	if (position - expected_px).length() > 1.0:
 		push_warning("[MOVE END] %s axial=%s pos=%s expected=%s diff=%s" % [
 			get_unit_name(), axial_pos, position, expected_px, str(position - expected_px)
@@ -574,16 +825,15 @@ func _jump_along_path(path: Array[Vector2i], from: Vector2i) -> void:
 	var leaving_ctrls: Array = hex_grid.get_zoc_controllers(axial_pos, get_faction())
 	# 扣除第一步 AP/疲劳（无论是否被命中都扣，BB 赔了夫人又折兵规则）
 	stats.spend_ap(AP_PER_HEX)
-	stats.add_fatigue(FATIGUE_PER_HEX)
+	stats.spend_stamina(move_stamina_per_hex())
 	for ctrl in leaving_ctrls:
 		if not is_alive():
 			break
-		var oa_result: Dictionary = DamageSystem.execute_attack(ctrl, self)
+		var oa_result: Dictionary = _DamageSystem.execute_attack(ctrl, self)
 		oa_result["is_opportunity_attack"] = true
-		var def_fat: int = DamageSystem.calculate_defend_fatigue(self)
+		var def_fat: int = apply_defend_stamina_cost(self)
 		if def_fat > 0:
-			stats.add_fatigue(def_fat)
-			oa_result["defend_fatigue"] = def_fat
+			oa_result["defend_stamina"] = def_fat
 		_apply_attack_result(ctrl, self, oa_result)
 		ctrl.face_toward(axial_pos)
 		ctrl.attacked.emit(ctrl, self, oa_result)
@@ -598,11 +848,11 @@ func _jump_along_path(path: Array[Vector2i], from: Vector2i) -> void:
 	# 扣除剩余路径的 AP/疲劳
 	if steps > 1:
 		stats.spend_ap(AP_PER_HEX * (steps - 1))
-		stats.add_fatigue(FATIGUE_PER_HEX * (steps - 1))
+		stats.spend_stamina(move_stamina_per_hex() * (steps - 1))
 
 	# ── 抛物线动画：跳过中间格，不触发中间 OA ──
 	var start_px: Vector2 = position
-	var end_px: Vector2 = HexCoord.axial_to_pixel(dest_axial, HexGrid.HEX_SIZE)
+	var end_px: Vector2 = _HexCoord.axial_to_pixel(dest_axial, _HexGrid.HEX_SIZE)
 	var arc_height: float = clamp(steps * 8.0, 30.0, 80.0)
 	var duration: float = clamp(steps * 0.07, 0.18, 0.55)
 	var tween := create_tween()
@@ -628,6 +878,18 @@ func _jump_along_path(path: Array[Vector2i], from: Vector2i) -> void:
 	stats_changed.emit(self)
 
 
+## 防守方被攻击气力消耗（命中/闪避/格挡均触发；design.md §三 base 2 × weight_mult）
+static func apply_defend_stamina_cost(target: Unit) -> int:
+	if target == null or target.stats == null:
+		return 0
+	var cost: int = _DamageSystem.calculate_defend_stamina_cost(target)
+	if cost <= 0:
+		return 0
+	target.stats.spend_stamina(cost)
+	target.stats_changed.emit(target)
+	return cost
+
+
 ## 把一次攻击结果应用到 target 上（用于借机攻击和正规攻击共用）
 static func _apply_attack_result(_attacker: Unit, target: Unit, result: Dictionary) -> void:
 	if not result.get("hit", false):
@@ -645,53 +907,24 @@ static func _apply_attack_result(_attacker: Unit, target: Unit, result: Dictiona
 		target.unit_died.emit(target)
 
 
-# ──────────── 攻击 ────────────
-## 对目标执行一次攻击（含命中、伤害管线计算）
-## 返回 DamageResult 字典
+# ──────────── 攻击 / 能力 ────────────
+## 通用能力入口（C1）；普攻 / 职业技能均走此路径
+func use_ability(ability, target: Unit = null, context: Dictionary = {}) -> Dictionary:
+	if ability == null:
+		return {"reason": "no_ability"}
+	if not ability.can_use(self, target):
+		return {"reason": "cannot_use"}
+	return ability.apply(self, target, context)
+
+
+## 对目标执行一次普攻（委托 BasicAttackAbility）
 func attack_target(target: Unit, attack_mode: String = "") -> Dictionary:
-	if not is_alive() or not target.is_alive() or weapon == null:
-		return {}
-	var attack_ap: int = get_weapon_ap_cost()
-	if stats.ap < attack_ap:
-		return {"reason": "not_enough_ap"}
-	var dist: int = HexCoord.distance(axial_pos, target.axial_pos)
-	if dist > weapon.attack_range:
-		return {"reason": "out_of_range"}
-	# 临时调试日志：定位"角色与敌人重合"bug
-	print("[ATTACK] %s@%s -> %s@%s  range=%d  pos.diff=%s" % [
-		get_unit_name(), axial_pos, target.get_unit_name(), target.axial_pos,
-		dist, str((target.position - position).round())
-	])
-
-	stats.spend_ap(attack_ap)
-	stats.add_fatigue(weapon.fatigue_cost)
-
-	# 如果没指定攻击模式，默认用第一个
-	var mode: String = attack_mode if not attack_mode.is_empty() else (weapon.attack_modes[0] if not weapon.attack_modes.is_empty() else weapon.damage_type)
-	var options: Dictionary = {"mode": mode} if not mode.is_empty() else {}
-	# 武器专精：在职业武器池内 1.0，否则 0.9（手拙）
-	options["mastery_dmg"] = 0.9 if has_unfamiliar_weapon() else 1.0
-	var result: Dictionary = DamageSystem.execute_attack(self, target, options)
-
-	# 防守方被攻击气力消耗（design.md § 三：命中/闪避/格挡均触发）
-	var defend_fat: int = DamageSystem.calculate_defend_fatigue(target)
-	if defend_fat > 0:
-		target.stats.add_fatigue(defend_fat)
-		result["defend_fatigue"] = defend_fat
-
-	_apply_attack_result(self, target, result)
-	face_toward(target.axial_pos)
-
-	stats_changed.emit(self)
-	attacked.emit(self, target, result)
-
-	# ──────── 夹击 (Pincer Attack) ────────
-	# 攻击命中且目标仍存活时，检查目标对侧是否有友军近战兵 → 触发追加打击
-	# 借机攻击不连锁触发（避免无限循环 / 套娃）
-	if result.get("hit", false) and target.is_alive() and not result.get("is_opportunity_attack", false):
-		_try_pincer_attack(target)
-
-	return result
+	# 运行时 load，避免 parse 阶段拉取 Ability 链（headless --script 时 autoload 未就绪）
+	return use_ability(
+		load("res://scripts/core/AbilityLibrary.gd").basic_attack(),
+		target,
+		{"attack_mode": attack_mode}
+	)
 
 
 # ──────────── 夹击 ────────────
@@ -704,7 +937,7 @@ const PINCER_DAMAGE_MULT: float = 0.5
 
 ## 面朝某格：攻击后朝向目标；背后 = (facing_dir + 3) % 6
 func face_toward(axial: Vector2i) -> void:
-	facing_dir = HexCoord.approx_direction(axial_pos, axial)
+	facing_dir = _HexCoord.approx_direction(axial_pos, axial)
 
 
 ## 开战初始化：面朝最近敌方（不要求相邻，用 approx_direction）
@@ -717,7 +950,7 @@ func face_nearest_enemy(units: Array) -> void:
 			continue
 		if u.get_faction() == my_faction:
 			continue
-		var dist: int = HexCoord.distance(axial_pos, u.axial_pos)
+		var dist: int = _HexCoord.distance(axial_pos, u.axial_pos)
 		if dist < best_dist:
 			best_dist = dist
 			best_axial = u.axial_pos
@@ -735,7 +968,7 @@ func _apply_facing_from_path(path: Array[Vector2i], path_start: Vector2i) -> voi
 
 
 func face_along_step(from_axial: Vector2i, to_axial: Vector2i) -> void:
-	facing_dir = HexCoord.approx_direction(from_axial, to_axial)
+	facing_dir = _HexCoord.approx_direction(from_axial, to_axial)
 
 
 static func _pincer_chance(attacker: Unit, target: Unit) -> float:
@@ -750,12 +983,12 @@ func _try_pincer_attack(target: Unit) -> void:
 	if weapon == null or weapon.weapon_type != "melee":
 		return
 	# 主攻击者必须在敌人正面格发起攻击
-	if not HexCoord.is_front_hex(axial_pos, target.axial_pos, target.facing_dir):
+	if not _HexCoord.is_front_hex(axial_pos, target.axial_pos, target.facing_dir):
 		return
 	if randf() > _pincer_chance(self, target):
 		return
 	# 背后格（主攻击者正对侧）的队友补刀
-	var rear_cell: Vector2i = HexCoord.opposite_across(axial_pos, target.axial_pos)
+	var rear_cell: Vector2i = _HexCoord.opposite_across(axial_pos, target.axial_pos)
 	var ally: Unit = hex_grid.get_occupant(rear_cell)
 	if ally == null or ally == self or not ally.is_alive():
 		return
@@ -763,16 +996,15 @@ func _try_pincer_attack(target: Unit) -> void:
 		return
 	if ally.weapon == null or ally.weapon.weapon_type != "melee":
 		return
-	var pincer_result: Dictionary = DamageSystem.execute_attack(ally, target)
+	var pincer_result: Dictionary = _DamageSystem.execute_attack(ally, target)
 	pincer_result["is_pincer_attack"] = true
 	# 伤害衰减
 	pincer_result["hp_damage"] = int(round(float(pincer_result.get("hp_damage", 0)) * PINCER_DAMAGE_MULT))
 	pincer_result["armor_damage"] = int(round(float(pincer_result.get("armor_damage", 0)) * PINCER_DAMAGE_MULT))
 	# 防守方被攻击气力消耗（命中/闪避/格挡均触发）
-	var pincer_def_fat: int = DamageSystem.calculate_defend_fatigue(target)
+	var pincer_def_fat: int = apply_defend_stamina_cost(target)
 	if pincer_def_fat > 0:
-		target.stats.add_fatigue(pincer_def_fat)
-		pincer_result["defend_fatigue"] = pincer_def_fat
+		pincer_result["defend_stamina"] = pincer_def_fat
 	_apply_attack_result(ally, target, pincer_result)
 	ally.attacked.emit(ally, target, pincer_result)
 	# 注意：被击中通常会触发 unit_died，由 DamageSystem 流程处理
@@ -819,8 +1051,8 @@ func play_hit_reaction(hit_strength: float = 0.6, was_hit: bool = true,
 	var knock_dir := Vector2.RIGHT
 	if from_axial != Vector2i(99999, 99999):
 		knock_dir = (
-			HexCoord.axial_to_pixel(axial_pos, HexGrid.HEX_SIZE)
-			- HexCoord.axial_to_pixel(from_axial, HexGrid.HEX_SIZE)
+			_HexCoord.axial_to_pixel(axial_pos, _HexGrid.HEX_SIZE)
+			- _HexCoord.axial_to_pixel(from_axial, _HexGrid.HEX_SIZE)
 		).normalized()
 		if knock_dir.length_squared() < 0.01:
 			knock_dir = Vector2.RIGHT
@@ -831,12 +1063,13 @@ func play_hit_reaction(hit_strength: float = 0.6, was_hit: bool = true,
 		squash = Vector2(1.20, 0.80)
 
 	var color_tween := create_tween()
-	color_tween.tween_property(self, "modulate", CombatPalette.hit_flash_white, 0.03)
+	var pal := _palette()
+	color_tween.tween_property(self, "modulate", pal.hit_flash_white, 0.03)
 	if was_hit:
-		var tint: Color = CombatPalette.hit_flash_crit if is_crit else CombatPalette.hit_flash_damage
+		var tint: Color = pal.hit_flash_crit if is_crit else pal.hit_flash_damage
 		color_tween.tween_property(self, "modulate", tint, 0.05)
 	else:
-		color_tween.tween_property(self, "modulate", CombatPalette.hit_flash_miss, 0.04)
+		color_tween.tween_property(self, "modulate", pal.hit_flash_miss, 0.04)
 	color_tween.tween_property(self, "modulate", Color.WHITE, 0.22)
 
 	var kb: float = lerpf(5.0, 14.0, strength)
@@ -859,12 +1092,12 @@ func play_hit_reaction(hit_strength: float = 0.6, was_hit: bool = true,
 func play_attack_lunge(target_axial: Vector2i) -> void:
 	if not is_alive():
 		return
-	var dir: Vector2 = (HexCoord.axial_to_pixel(target_axial, HexGrid.HEX_SIZE)
-		- HexCoord.axial_to_pixel(axial_pos, HexGrid.HEX_SIZE)).normalized()
+	var dir: Vector2 = (_HexCoord.axial_to_pixel(target_axial, _HexGrid.HEX_SIZE)
+		- _HexCoord.axial_to_pixel(axial_pos, _HexGrid.HEX_SIZE)).normalized()
 	if dir.length_squared() < 0.01:
 		dir = Vector2.RIGHT
-	var pull_back: Vector2 = -dir * (HexGrid.HEX_SIZE * 0.14)
-	var lunge_off: Vector2 = dir * (HexGrid.HEX_SIZE * 0.50)
+	var pull_back: Vector2 = -dir * (_HexGrid.HEX_SIZE * 0.14)
+	var lunge_off: Vector2 = dir * (_HexGrid.HEX_SIZE * 0.50)
 	var tween := create_tween()
 	tween.tween_property(self, "_visual_scale", Vector2(0.94, 1.06), 0.05)
 	tween.parallel().tween_property(self, "_visual_offset", pull_back, 0.05)
@@ -899,15 +1132,17 @@ func _draw() -> void:
 	var trim_color: Color
 	var glow_color: Color
 	if get_faction() == 0:
-		tunic_color = CombatPalette.with_alpha(CombatPalette.ally, 1.0).lerp(Color.WHITE, 0.35)
-		tunic_dark  = CombatPalette.ally.darkened(0.35)
-		trim_color  = CombatPalette.accent_gold
-		glow_color  = CombatPalette.ally_glow
+		var pal := _palette()
+		tunic_color = pal.with_alpha(pal.ally, 1.0).lerp(Color.WHITE, 0.35)
+		tunic_dark  = pal.ally.darkened(0.35)
+		trim_color  = pal.accent_gold
+		glow_color  = pal.ally_glow
 	else:
-		tunic_color = CombatPalette.enemy.lerp(Color.WHITE, 0.12)
-		tunic_dark  = CombatPalette.enemy.darkened(0.35)
+		var pal := _palette()
+		tunic_color = pal.enemy.lerp(Color.WHITE, 0.12)
+		tunic_dark  = pal.enemy.darkened(0.35)
 		trim_color  = Color(0.20, 0.18, 0.14)
-		glow_color  = CombatPalette.enemy_glow
+		glow_color  = pal.enemy_glow
 
 	var skin_color := Color(0.92, 0.78, 0.62)
 	var skin_dark  := Color(0.70, 0.55, 0.42)
@@ -1193,7 +1428,8 @@ func _draw_sprite_mode() -> void:
 	var t_ms: float = float(Time.get_ticks_msec())
 	var breath: float = 0.5 + 0.5 * sin(t_ms / 380.0)
 
-	var glow_color: Color = CombatPalette.ally_glow if get_faction() == 0 else CombatPalette.enemy_glow
+	var pal := _palette()
+	var glow_color: Color = pal.ally_glow if get_faction() == 0 else pal.enemy_glow
 	var shadow_y: float = 16.0
 
 	# 心跳上跳偏移（仅当前回合且己方）

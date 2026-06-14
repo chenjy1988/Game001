@@ -1,4 +1,8 @@
 extends Node
+
+const _WeaponData = preload("res://scripts/core/WeaponData.gd")
+const _ArmorData = preload("res://scripts/core/ArmorData.gd")
+const _ShieldData = preload("res://scripts/core/ShieldData.gd")
 ##
 ## WeaponArmorDB.gd — 武器/护甲数据库（autoload 单例）
 ##
@@ -7,15 +11,20 @@ extends Node
 
 const WEAPONS_PATH := "res://data/weapons.json"
 const ARMORS_PATH := "res://data/armors.json"
+const SHIELDS_PATH := "res://data/shields.json"
 
 var _weapons: Dictionary = {}  ## id -> WeaponData
 var _armors: Dictionary = {}   ## id -> ArmorData
+var _shields: Dictionary = {}  ## id -> ShieldData
 
 
 func _ready() -> void:
 	_load_weapons()
 	_load_armors()
-	print("[WeaponArmorDB] loaded %d weapons, %d armors" % [_weapons.size(), _armors.size()])
+	_load_shields()
+	print("[WeaponArmorDB] loaded %d weapons, %d armors, %d shields" % [
+		_weapons.size(), _armors.size(), _shields.size()
+	])
 
 
 func _load_weapons() -> void:
@@ -29,7 +38,7 @@ func _load_weapons() -> void:
 		push_error("武器 JSON 解析失败")
 		return
 	for entry in data["weapons"]:
-		var w := WeaponData.new()
+		var w := _WeaponData.new()
 		w.id = entry.get("id", "")
 		w.display_name = entry.get("display_name", "")
 
@@ -72,7 +81,7 @@ func _load_weapons() -> void:
 		w.damage_max = int(entry.get("damage_max", w.damage_base))
 		w.armor_effectiveness = float(entry.get("armor_effectiveness", 1.0))
 		w.armor_penetration = float(entry.get("armor_penetration", 0.0))
-		w.fatigue_cost = int(entry.get("fatigue_cost", 6))
+		w.stamina_cost = int(entry.get("stamina_cost", entry.get("fatigue_cost", 6)))
 		w.head_damage_mult = float(entry.get("head_damage_mult", 1.5))
 		w.crit_mult = float(entry.get("crit_mult", 1.5))
 		w.bonus_crit_chance = float(entry.get("bonus_crit_chance", 0.0))
@@ -93,7 +102,7 @@ func _load_armors() -> void:
 		push_error("护甲 JSON 解析失败")
 		return
 	for entry in data["armors"]:
-		var a := ArmorData.new()
+		var a := _ArmorData.new()
 		a.id = entry.get("id", "")
 		a.display_name = entry.get("display_name", "")
 		a.head_armor = int(entry.get("head_armor", 0))
@@ -108,12 +117,33 @@ func _load_armors() -> void:
 		_armors[a.id] = a
 
 
-func get_weapon(id: String) -> WeaponData:
+func get_weapon(id: String) -> _WeaponData:
 	return _weapons.get(id, null)
 
 
-func get_armor(id: String) -> ArmorData:
+func get_armor(id: String) -> _ArmorData:
 	return _armors.get(id, null)
+
+
+func _load_shields() -> void:
+	var file := FileAccess.open(SHIELDS_PATH, FileAccess.READ)
+	if file == null:
+		push_error("无法打开盾牌配置: " + SHIELDS_PATH)
+		return
+	var data: Variant = JSON.parse_string(file.get_as_text())
+	if data == null or not data.has("shields"):
+		push_error("盾牌 JSON 解析失败")
+		return
+	for entry in data["shields"]:
+		var s = _ShieldData.new()
+		s.id = entry.get("id", "")
+		s.display_name = entry.get("display_name", "")
+		s.block_value = int(entry.get("block_value", 25))
+		_shields[s.id] = s
+
+
+func get_shield(id: String):
+	return _shields.get(id, null)
 
 
 func list_weapon_ids() -> Array:

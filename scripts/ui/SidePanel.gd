@@ -90,8 +90,9 @@ func _refresh(_u = null) -> void:
 	ap_label.text = "%d / %d" % [s.ap, s.max_ap]
 
 	fatigue_bar.max_value = max(1, s.max_stamina)
-	fatigue_bar.value = s.fatigue
-	fatigue_label.text = "%d / %d" % [s.fatigue, s.max_stamina]
+	var remain: int = s.remaining_stamina()
+	fatigue_bar.value = remain
+	fatigue_label.text = "%d / %d" % [remain, s.max_stamina]
 
 	var job_name: String = _bound_unit.job.display_name if _bound_unit.job != null else "—"
 	var crit_pct: int = int(round(DamageSystem.calculate_crit_chance(_bound_unit) * 100.0))
@@ -114,8 +115,8 @@ func _refresh(_u = null) -> void:
 	# Initiative：显示有效值（含护甲重量惩罚），让玩家看清"重甲拖慢"的程度
 	var armor_w: int = _bound_unit.armor.weight if _bound_unit.armor else 0
 	var armor_init_penalty: int = int(floor(float(armor_w) / 4.0))
-	initiative_label.text = "Initiative：%d  (基础 %d - 疲劳 %d - 甲重 %d)" % [
-		s.effective_initiative(armor_w, 0), s.base_initiative, s.fatigue, armor_init_penalty
+	initiative_label.text = "Initiative：%d  (基础 %d − 已耗 %d − 甲重 %d)" % [
+		s.effective_initiative(armor_w, 0), s.base_initiative, s.stamina_spent(), armor_init_penalty
 	]
 
 

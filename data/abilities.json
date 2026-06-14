@@ -1,0 +1,144 @@
+{
+  "_doc": "数据驱动技能定义（Phase 2.5）— schema 详见 design/ability-data-driven-guide.md。ATTACK 类技能不在此列，留给 .gd 子类实现。",
+
+  "tui_zhuang": {
+    "id": "tui_zhuang",
+    "display_name": "推撞",
+    "kind": "UTILITY",
+    "targeting": "SINGLE_ENEMY",
+    "ap_cost": 4,
+    "range": 1,
+    "mutex_group": "attack",
+    "movement": {
+      "kind": "PUSH",
+      "distance": 1,
+      "on_block_damage": 0
+    },
+    "constraints": [
+      "self.move >= target.move"
+    ],
+    "ai_hint": {
+      "priority": "positioning",
+      "prefers": "near_terrain_hazard",
+      "risk": "low",
+      "situational": 5.0
+    }
+  },
+
+  "huan_wei": {
+    "id": "huan_wei",
+    "display_name": "换位",
+    "kind": "UTILITY",
+    "targeting": "SINGLE_ALLY",
+    "ap_cost": 2,
+    "range": 1,
+    "movement": {
+      "kind": "SWAP",
+      "ignore_zoc": true
+    },
+    "ai_hint": {
+      "priority": "positioning",
+      "prefers": "low_hp_ally",
+      "risk": "low",
+      "situational": 8.0
+    }
+  },
+
+  "chao_feng": {
+    "id": "chao_feng",
+    "display_name": "嘲讽",
+    "kind": "DEBUFF",
+    "targeting": "SINGLE_ENEMY",
+    "ap_cost": 1,
+    "range": 2,
+    "effects": [
+      { "type": "debuff", "id": "taunted", "duration": 2 }
+    ],
+    "ai_hint": {
+      "priority": "buff",
+      "prefers": "near_low_hp_ally",
+      "risk": "low",
+      "situational": 6.0
+    }
+  },
+
+  "yi_xing": {
+    "id": "yi_xing",
+    "display_name": "移形",
+    "kind": "UTILITY",
+    "targeting": "SELF",
+    "ap_cost": 2,
+    "range": 1,
+    "movement": {
+      "kind": "TELEPORT",
+      "distance": 1,
+      "ignore_zoc": true,
+      "ignore_terrain": false
+    },
+    "ai_hint": {
+      "priority": "positioning",
+      "prefers": "in_zoc",
+      "risk": "low",
+      "situational": 6.0
+    }
+  },
+
+  "zhen_fen_jun_xin": {
+    "id": "zhen_fen_jun_xin",
+    "display_name": "振奋军心",
+    "kind": "BUFF",
+    "targeting": "ALLIES_IN_RANGE",
+    "ap_cost": 3,
+    "range": 2,
+    "effects": [
+      { "type": "buff", "id": "morale_up", "duration": 1, "params": { "morale_delta": 1 } }
+    ],
+    "_note": "Phase 2.5 框架就绪；morale 数值系统 Phase 3 实装，目前 apply_effect_spec 为 stub",
+    "ai_hint": {
+      "priority": "buff",
+      "prefers": "low_hp_ally",
+      "risk": "medium",
+      "situational": 6.0
+    }
+  },
+
+  "bao_za": {
+    "id": "bao_za",
+    "display_name": "包扎",
+    "kind": "UTILITY",
+    "targeting": "SINGLE_ALLY",
+    "allow_self": true,
+    "ap_cost": 2,
+    "range": 1,
+    "remove_effects": ["bleeding", "poisoned", "burning", "weakened"],
+    "wisdom_count": { "skew": "exponential", "max": 4 },
+    "ai_hint": {
+      "priority": "buff",
+      "prefers": "low_hp_ally",
+      "risk": "low",
+      "situational": 5.0
+    }
+  },
+
+  "bao_za_jing_jin": {
+    "id": "bao_za_jing_jin",
+    "display_name": "包扎·精进",
+    "kind": "UTILITY",
+    "targeting": "SINGLE_ALLY",
+    "allow_self": true,
+    "ap_cost": 2,
+    "range": 1,
+    "remove_effects": ["bleeding", "poisoned", "burning", "weakened"],
+    "wisdom_count": { "skew": "exponential", "max": 4 },
+    "self_effects": [
+      { "type": "buff", "id": "ignore_injury_debuffs", "duration": -1 }
+    ],
+    "_note": "高级包扎：初级效果 + 全战斗无视伤势 buff。effect 系统 Phase 3 落地后激活。",
+    "ai_hint": {
+      "priority": "buff",
+      "prefers": "low_hp_ally",
+      "risk": "low",
+      "situational": 10.0
+    }
+  }
+}
