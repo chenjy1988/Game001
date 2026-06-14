@@ -1,0 +1,26 @@
+{
+	"_comment": "BattleSimHarness 阵容 SoT — I3 数值门禁",
+	"mirror_4v4": {
+		"description": "四职镜像：友敌同 job/武器/护甲，仅阵营与站位不同",
+		"slots": [
+			{"job": "tiaodang", "weapon": "saber", "armor": "mail_armor", "archetype": "skirmisher"},
+			{"job": "qiangbing", "weapon": "spear", "armor": "mail_armor", "archetype": "infantry"},
+			{"job": "qibing", "weapon": "saber", "armor": "leather_armor", "archetype": "skirmisher"},
+			{"job": "chihou", "weapon": "dagger", "armor": "leather_armor", "archetype": "scout"}
+		],
+		"ally_positions": [
+			{"x": -4, "y": 1},
+			{"x": -3, "y": 2},
+			{"x": -2, "y": 1},
+			{"x": -3, "y": 0}
+		],
+		"enemy_positions": [
+			{"x": 4, "y": -1},
+			{"x": 3, "y": -2},
+			{"x": 2, "y": -1},
+			{"x": 3, "y": 0}
+		],
+		"ally_disposition": "disciplined",
+		"enemy_disposition_default": "disciplined"
+	}
+}

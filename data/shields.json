@@ -1,0 +1,10 @@
+{
+  "shields": [
+    {
+      "id": "round_shield",
+      "display_name": "团牌",
+      "block_value": 25,
+      "_comment": "跳荡标配副手；配盾时 block_pts 仅取此值，主手武器 block 不计"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "_comment": "战法倾向 — 仅影响战术 AI，不含性格",
+  "dispositions": [
+    {
+      "id": "default",
+      "display_name": "均衡",
+      "behavior_mult": {}
+    },
+    {
+      "id": "disciplined",
+      "display_name": "纪律",
+      "behavior_mult": { "engage": 0.95, "attack": 1.0, "wait": 1.2, "defend": 1.25, "retreat": 0.85 }
+    },
+    {
+      "id": "berserk",
+      "display_name": "狂战",
+      "behavior_mult": { "engage": 1.3, "attack": 1.15, "advance": 1.2, "wait": 0.1, "retreat": 0.5, "disengage": 0.4 }
+    },
+    {
+      "id": "guard",
+      "display_name": "固守",
+      "behavior_mult": { "engage": 0.85, "attack": 0.9, "wait": 1.3, "defend": 1.4, "retreat": 1.1, "disengage": 0.7 }
+    },
+    {
+      "id": "focus_fire",
+      "display_name": "集火",
+      "behavior_mult": { "attack": 1.2, "engage": 1.1 },
+      "target_mult": 1.15
+    }
+  ]
+}

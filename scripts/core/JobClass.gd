@@ -32,6 +32,9 @@ class_name JobClass
 ## 可熟练使用的武器 id 列表；不在池内装备触发「手拙」debuff
 @export var weapon_pool: Array[String] = []
 
+## 职业自带战斗技能 id（AbilityLibrary 查询）
+@export var abilities: Array[String] = []
+
 
 ## 是否在武器池内
 func has_weapon(weapon_id: String) -> bool:

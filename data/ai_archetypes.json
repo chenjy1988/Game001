@@ -1,0 +1,53 @@
+{
+  "_comment": "兵种 AI 模板 — behavior_mult / 落点敏感度",
+  "archetypes": [
+    {
+      "id": "infantry",
+      "display_name": "步兵",
+      "behavior_mult": { "engage": 1.0, "attack": 1.0, "advance": 1.0, "wait": 1.0, "retreat": 1.0, "disengage": 0.5, "defend": 1.1 },
+      "flank_mult": 1.0,
+      "threat_sensitivity": 0.5,
+      "oa_sensitivity": 0.5
+    },
+    {
+      "id": "heavy_infantry",
+      "display_name": "重步兵",
+      "behavior_mult": { "engage": 1.15, "attack": 1.05, "advance": 0.9, "wait": 0.8, "retreat": 0.7, "disengage": 0.3, "defend": 1.3 },
+      "flank_mult": 0.8,
+      "threat_sensitivity": 0.35,
+      "oa_sensitivity": 0.35
+    },
+    {
+      "id": "skirmisher",
+      "display_name": "散兵",
+      "behavior_mult": { "engage": 0.8, "attack": 1.0, "advance": 0.85, "wait": 1.35, "retreat": 1.0, "disengage": 1.2, "defend": 0.7 },
+      "flank_mult": 1.2,
+      "threat_sensitivity": 0.75,
+      "oa_sensitivity": 0.7
+    },
+    {
+      "id": "scout",
+      "display_name": "斥候",
+      "behavior_mult": { "engage": 0.95, "attack": 0.95, "advance": 1.0, "wait": 1.1, "retreat": 1.1, "disengage": 1.3, "defend": 0.6 },
+      "flank_mult": 1.15,
+      "threat_sensitivity": 0.8,
+      "oa_sensitivity": 0.65
+    },
+    {
+      "id": "archer",
+      "display_name": "弓手",
+      "behavior_mult": { "engage": 0.75, "attack": 1.0, "advance": 0.6, "wait": 1.0, "retreat": 1.2, "disengage": 1.5, "defend": 0.5 },
+      "flank_mult": 0.9,
+      "threat_sensitivity": 1.2,
+      "oa_sensitivity": 0.85
+    },
+    {
+      "id": "bandit",
+      "display_name": "匪徒",
+      "behavior_mult": { "engage": 1.05, "attack": 1.0, "advance": 1.0, "wait": 0.85, "retreat": 0.9, "disengage": 1.0, "defend": 0.8 },
+      "flank_mult": 1.05,
+      "threat_sensitivity": 0.55,
+      "oa_sensitivity": 0.55
+    }
+  ]
+}

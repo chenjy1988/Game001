@@ -90,8 +90,8 @@ class_name WeaponData
 ## DEPRECATED：旧穿甲率（v3.1 用 weight × 渗透公式替代）
 @export var armor_penetration: float = 0.0
 
-## DEPRECATED：旧 fatigue_cost（v3.1 用 base_stamina × weight_mult 公式替代）
-@export var fatigue_cost: int = 6
+## [DEPRECATED] 普攻气力改走 DamageSystem.attack_stamina_base_for × weight_mult；JSON 字段保留兼容
+@export var stamina_cost: int = 6
 
 ## DEPRECATED：旧 attack_range（v3.1 用 range_min/range_max 替代）
 @export var attack_range: int = 1

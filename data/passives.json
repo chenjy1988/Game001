@@ -1,0 +1,71 @@
+{
+  "_doc": "被动技能数据驱动定义（Phase 2.5 P1）。复杂公式/事件回调请写 .gd 子类。Schema 详见 design/passive-effect-system.md。",
+
+  "bu_qu": {
+    "id": "bu_qu",
+    "display_name": "不屈",
+    "kind": "conditional",
+    "trigger_when": "self.hp_ratio < 0.30",
+    "modifiers": {
+      "defense_flat": 10.0,
+      "resolve_flat": 15.0
+    },
+    "source": "tiaodang",
+    "ai_hint": { "category": "tank" }
+  },
+
+  "tie_gu": {
+    "id": "tie_gu",
+    "display_name": "铁骨",
+    "kind": "conditional",
+    "trigger_when": "self.total_armor_weight >= 30",
+    "modifiers": {
+      "armor_damage_mult": 0.85
+    },
+    "mutex_with": ["qi_hai_hui_xuan"],
+    "source": "general",
+    "ai_hint": { "category": "tank" }
+  },
+
+  "jie_shi_he_ji": {
+    "id": "jie_shi_he_ji",
+    "display_name": "借势合击",
+    "kind": "permanent",
+    "hooks": [
+      {
+        "hook": "self_overwhelm_bonus",
+        "condition": "context.overwhelm_count >= 1",
+        "modifier": { "per_ally": 0.08, "cap": 0.24 }
+      }
+    ],
+    "source": "general",
+    "ai_hint": { "category": "low_melee_rescue" }
+  },
+
+  "qi_hai_hui_xuan": {
+    "id": "qi_hai_hui_xuan",
+    "display_name": "气海回旋",
+    "kind": "conditional",
+    "trigger_when": "self.total_armor_weight < 30",
+    "trigger_phase": "on_take_hit",
+    "_note": "Phase 2.5 stub；full formula needs .gd subclass. Placeholder for mutex.",
+    "stamina_cost_per_trigger": 5,
+    "mutex_with": ["tie_gu"],
+    "source": "general",
+    "ai_hint": { "category": "tank" }
+  },
+
+  "ye_zhan_ba_fang": {
+    "id": "ye_zhan_ba_fang",
+    "display_name": "野战八方",
+    "kind": "permanent",
+    "hooks": [
+      {
+        "hook": "incoming_overwhelm_bonus",
+        "modifier": { "set": 0.0 }
+      }
+    ],
+    "source": "tiaodang",
+    "ai_hint": { "category": "tank" }
+  }
+}

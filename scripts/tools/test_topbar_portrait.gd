@@ -7,7 +7,7 @@ class TestUnit extends Unit:
 		stats.unit_name = name
 		stats.faction = randi() % 2
 		stats.base_initiative = 50 + randi() % 50
-		stats.init_runtime(0)
+		stats.init_runtime()
 
 func _initialize() -> void:
 	print("=== TopBar Portrait Interaction Test ===\n")

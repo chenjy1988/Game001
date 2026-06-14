@@ -466,7 +466,7 @@ func _refresh() -> void:
 
 	# 状态行
 	var hp_ratio: float = float(s.hp) / float(max(1, s.max_hp))
-	var fatigue_ratio: float = float(s.fatigue) / float(max(1, s.max_stamina))
+	var stamina_ratio: float = s.stamina_ratio()
 	var hp_state: String = STATE_HEALTHY
 	if hp_ratio < 0.25:
 		hp_state = STATE_CRITICAL
@@ -474,26 +474,26 @@ func _refresh() -> void:
 		hp_state = STATE_HEAVY
 	elif hp_ratio < 1.0:
 		hp_state = STATE_LIGHT
-	var fatigue_state: String = ""
-	if fatigue_ratio > 0.85:
-		fatigue_state = " · " + STATE_EXHAUSTED
-	elif fatigue_ratio > 0.5:
-		fatigue_state = " · " + STATE_TIRED
+	var stamina_state: String = ""
+	if stamina_ratio <= 0.2:
+		stamina_state = " · " + STATE_EXHAUSTED
+	elif stamina_ratio <= 0.5:
+		stamina_state = " · " + STATE_TIRED
 	var faction_text: String = "[友方]" if s.faction == 0 else "[敌方]"
-	state_label.text = "%s  %s%s" % [faction_text, hp_state, fatigue_state]
+	state_label.text = "%s  %s%s" % [faction_text, hp_state, stamina_state]
 
 	# HP / 头甲 / 身甲 / 疲劳 / AP
 	_set_bar_value(hp_bar, s.hp, s.max_hp)
 	_set_bar_value(head_bar, s.head_armor, max(1, s.max_head_armor))
 	_set_bar_value(body_bar, s.body_armor, max(1, s.max_body_armor))
-	_set_bar_value(fatigue_bar, s.fatigue, max(1, s.max_stamina))
+	_set_bar_value(fatigue_bar, s.remaining_stamina(), max(1, s.max_stamina))
 	if _ap_bar:
 		_set_bar_value(_ap_bar, s.ap, s.max_ap)
 
 	# Initiative
 	if _initiative_label:
-		_initiative_label.text = "速度 %d (基础 %d − 疲劳 %d)" % [
-			s.current_initiative(), s.base_initiative, s.fatigue
+		_initiative_label.text = "速度 %d (基础 %d − 已耗 %d)" % [
+			s.current_initiative(), s.base_initiative, s.stamina_spent()
 		]
 
 	# 武器 / 护甲

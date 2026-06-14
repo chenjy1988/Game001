@@ -15,6 +15,7 @@ signal unit_unhovered(unit: Unit)  ## 鼠标离开单位模型
 
 const HitEffectScript = preload("res://scripts/effects/HitEffect.gd")
 const DamageNumberScript = preload("res://scripts/effects/DamageNumber.gd")
+const _FactionBrain = preload("res://scripts/ai/faction_brain.gd")
 
 @onready var hex_grid: HexGrid = $HexGrid
 @onready var turn_manager: TurnManager = $TurnManager
@@ -33,6 +34,7 @@ var _input_state: int = InputState.IDLE
 var _selected_unit: Unit = null
 var _all_units: Array[Unit] = []
 var _ai_acting: bool = false
+var _battle_seed: int = 0  ## 每局种子（_ready 时初始化，AI RNG 派生于它）
 
 
 var _battle_log_panel: Panel = null
@@ -42,25 +44,31 @@ var _log_last_entry_lbl: Label = null    ## 收起时显示最新一条日志
 var _bottom_bar_panel: PanelContainer = null   ## 底部独立头像行动条容器
 var _combat_menu: Node = null                  ## 战斗 5 大类菜单（F1，CombatMenu 实例）
 var _pending_attack_mode: String = ""          ## 当前待选择的攻击模式（F3）
+var _pending_item_id: String = ""              ## 当前待选目标的道具 id（F4 占位）
 var _log_expanded: bool = false                ## 记录战斗日志展开状态（展开/折叠）
 const LOG_COLLAPSED_MAX_ENTRIES: int = 2       ## 折叠区保留最近 N 条（攻击+倒下等连续事件）
-const LOG_PANEL_TOP: float = 55.0
 const LOG_PANEL_W: float = 288.0
 const LOG_PANEL_MARGIN: float = 8.0
+const LOG_PANEL_GAP_BELOW_TOPBAR: float = 8.0   ## 与 TopBar 底边的间距
 const LOG_PANEL_COLLAPSED_H: float = 102.0
 const LOG_PANEL_EXPANDED_H: float = 234.0
+var _log_panel_top: float = 82.0                ## TopBar 底 + gap；_setup 时重算
 var _log_collapsed_entries: Array[String] = []
 var _log_scroll_following: bool = true         ## 用户手动上滑后为 false，回到底部后恢复
 
 var _pause_menu_visible: bool = false
 var _pause_overlay: ColorRect = null
+var _faction_brains: Dictionary = {}
 
 const _CombatMenuScript = preload("res://scripts/ui/CombatMenu.gd")
 
 func _ready() -> void:
+	# 每局固定种子，AI 决策可复现
+	_battle_seed = randi() % 2147483647
 	hex_grid.hex_clicked.connect(_on_hex_clicked)
 	hex_grid.hex_hovered.connect(_on_hex_hovered)
 	turn_manager.turn_started.connect(_on_turn_started)
+	turn_manager.round_started.connect(_on_ai_round_started)
 	turn_manager.battle_ended.connect(_on_battle_ended)
 
 	_fit_camera_to_map()
@@ -83,6 +91,7 @@ func _ready() -> void:
 		u.unit_died.connect(_on_any_unit_died)
 		u.moved.connect(_on_any_unit_moved)
 	turn_manager.start_battle()
+	_refresh_faction_brains()
 	# 初始化战争迷雾（基于友方单位初始位置）
 	_update_fog_of_war()
 
@@ -98,10 +107,11 @@ func _setup_battle_log_panel() -> void:
 	box.name = "BattleLog"
 	box.anchor_left = 1.0; box.anchor_top = 0.0
 	box.anchor_right = 1.0; box.anchor_bottom = 0.0
+	_log_panel_top = _compute_log_panel_top()
 	box.offset_left = -(LOG_PANEL_W + LOG_PANEL_MARGIN)
-	box.offset_top = LOG_PANEL_TOP
+	box.offset_top = _log_panel_top
 	box.offset_right = -LOG_PANEL_MARGIN
-	box.offset_bottom = LOG_PANEL_TOP + LOG_PANEL_COLLAPSED_H
+	box.offset_bottom = _log_panel_top + LOG_PANEL_COLLAPSED_H
 	box.clip_contents = true
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var sb := StyleBoxFlat.new()
@@ -266,16 +276,27 @@ func _on_log_scroll_value_changed(value: float) -> void:
 
 
 func _scroll_log_to_bottom() -> void:
-	if _log_scroll == null or not _log_scroll_following:
+	if not _log_scroll_following:
 		return
-	var sb: VScrollBar = _log_scroll.get_v_scroll_bar()
-	sb.value = sb.max_value
+	call_deferred("_scroll_log_to_bottom_deferred")
 
 
 ## 切换战斗日志展开/折叠（仅响应用户点击）
 func toggle_battle_log() -> void:
 	_log_expanded = not _log_expanded
 	_apply_log_expanded_state()
+
+
+## 战斗日志顶边 = TopBar 底边 + 间距（避免与行动条重合）
+func _compute_log_panel_top() -> float:
+	if top_bar == null:
+		return 74.0 + LOG_PANEL_GAP_BELOW_TOPBAR
+	var bar_h: float = top_bar.size.y
+	if bar_h < 1.0:
+		bar_h = top_bar.get_combined_minimum_size().y
+	if bar_h < 1.0:
+		bar_h = 74.0   # TopBar.tscn offset_bottom / PORTRAIT_ROW_H+6
+	return bar_h + LOG_PANEL_GAP_BELOW_TOPBAR
 
 
 ## 根据 _log_expanded 切换高度 + 日志区可见性
@@ -287,13 +308,13 @@ func _apply_log_expanded_state() -> void:
 	if _log_expanded:
 		if log_area: log_area.visible = true
 		if _log_last_entry_lbl: _log_last_entry_lbl.visible = false
-		_battle_log_panel.offset_bottom = LOG_PANEL_TOP + LOG_PANEL_EXPANDED_H
+		_battle_log_panel.offset_bottom = _log_panel_top + LOG_PANEL_EXPANDED_H
 		call_deferred("_scroll_log_to_bottom")
 		if btn: btn.text = "收起 ▲"
 	else:
 		if log_area: log_area.visible = false
 		if _log_last_entry_lbl: _log_last_entry_lbl.visible = true
-		_battle_log_panel.offset_bottom = LOG_PANEL_TOP + LOG_PANEL_COLLAPSED_H
+		_battle_log_panel.offset_bottom = _log_panel_top + LOG_PANEL_COLLAPSED_H
 		if btn: btn.text = "展开 ▼"
 	_configure_battle_log_mouse_filters()
 
@@ -407,7 +428,8 @@ func _on_combat_menu_action(action_id: String) -> void:
 			if is_second_wait:
 				_log_hint("[color=#CC4444]【结束回合】%s 选择结束回合，剩余 AP 作废[/color]" % unit.stats.unit_name)
 			else:
-				_log_hint("[color=#CCAA44]【等待】%s 选择等待，将在本回合最后行动[/color]" % unit.stats.unit_name)
+				_log_hint("[color=#CCAA44]【等待】%s 选择等待，将在本回合最后行动（气力 -%d）[/color]" % [
+					unit.stats.unit_name, TurnManager.WAIT_STAMINA_COST])
 			print("[BattleScene] 等待触发：单位=%s, AP=%d, can_wait=%s, 第二次=%s" % [
 				unit.stats.unit_name, unit.stats.ap,
 				turn_manager.can_wait() if turn_manager.has_method("can_wait") else "N/A",
@@ -433,7 +455,7 @@ func _on_combat_menu_action(action_id: String) -> void:
 		_clear_attack_targeting()
 		var breath_unit: Unit = turn_manager.get_current_unit()
 		if breath_unit and breath_unit.use_ability_breath_regulation():
-			var remain_b: int = max(0, breath_unit.stats.max_stamina - breath_unit.stats.fatigue)
+			var remain_b: int = max(0, breath_unit.stats.max_stamina - breath_unit.stats.stamina_spent())
 			_log_hint("[color=#88CCAA]【吐纳调息】%s 深调一口气，气力恢复至 %d/%d[/color]" % [
 				breath_unit.get_unit_name(), remain_b, breath_unit.stats.max_stamina])
 			breath_unit.end_turn()
@@ -451,7 +473,21 @@ func _on_combat_menu_action(action_id: String) -> void:
 		_log_hint("[color=#888888]【技能】尚未开放（Phase 2.5 接入职业能力）[/color]")
 		return
 	if action_id.begins_with("item_"):
-		_log_hint("[color=#888888]【道具】尚未开放（Phase 3 接入背包）[/color]")
+		var item_id: String = action_id.substr("item_".length())
+		if item_id == "":
+			return
+		_pending_attack_mode = ""
+		_pending_item_id = item_id
+		var item_unit: Unit = turn_manager.get_current_unit()
+		var item_label: String = item_id
+		if item_unit:
+			for entry in item_unit.inventory:
+				if entry is Dictionary and str(entry.get("id", "")) == item_id:
+					item_label = str(entry.get("name", item_id))
+					break
+		_log_hint("[color=#88AA88]【道具】已选 %s — 点击目标单位（Phase 3 占位）[/color]" % item_label)
+		if item_unit and item_unit.get_faction() == 0:
+			_select_unit(item_unit)
 		return
 
 
@@ -464,8 +500,11 @@ func _primary_attack_mode(unit: Unit) -> String:
 
 func _clear_attack_targeting() -> void:
 	_pending_attack_mode = ""
+	_pending_item_id = ""
 	if _combat_menu and _combat_menu.has_method("clear_action_highlight"):
 		_combat_menu.clear_action_highlight()
+	if _combat_menu and _combat_menu.has_method("close_item_popup"):
+		_combat_menu.close_item_popup()
 
 
 func _mode_chinese(mode: String) -> String:
@@ -483,13 +522,6 @@ func _log_hint(bbcode: String) -> void:
 		_log_richtext.append_text(bbcode + "\n")
 		call_deferred("_scroll_log_to_bottom")
 	_update_log_last_entry(bbcode)
-
-
-func _scroll_log_to_bottom() -> void:
-	if _log_richtext == null:
-		return
-	# 等 RichTextLabel 完成换行布局后再滚底（否则最后一行常被裁在可视区外）
-	call_deferred("_scroll_log_to_bottom_deferred")
 
 
 func _scroll_log_to_bottom_deferred() -> void:
@@ -575,10 +607,15 @@ func _spawn_units() -> void:
 	_create_unit_from_job("李四", 0, Vector2i(-3,  0), "chihou",    "dagger", "leather_armor")
 
 	# 敌方 4 人：杂兵 ×3 + 重甲精英（plate_armor Body 280）
-	_create_unit("强盗头目",     1, Vector2i( 2, -1), "battle_axe", "mail_armor",    {"hp": 80, "melee": 55, "def": 15, "init": 95})
-	_create_unit("强盗匕首手",   1, Vector2i( 3, -2), "dagger",     "leather_armor", {"hp": 50, "melee": 50, "def": 25, "init": 115})
-	_create_unit("强盗矛兵",     1, Vector2i( 2,  0), "spear",      "leather_armor", {"hp": 60, "melee": 50, "def": 15, "init": 100})
-	_create_unit("强盗重甲头目", 1, Vector2i( 3, -1), "battle_axe", "plate_armor",   {"hp": 95, "melee": 52, "def": 18, "init": 72, "wisdom": 22})
+	_create_unit("强盗头目", 1, Vector2i(2, -1), "battle_axe", "mail_armor",
+		{"hp": 80, "melee": 55, "def": 15, "init": 95, "archetype": "bandit", "disposition": "berserk"})
+	_create_unit("强盗匕首手", 1, Vector2i(3, -2), "dagger", "leather_armor",
+		{"hp": 50, "melee": 50, "def": 25, "init": 115, "archetype": "skirmisher", "disposition": "default"})
+	_create_unit("强盗矛兵", 1, Vector2i(2, 0), "spear", "leather_armor",
+		{"hp": 60, "melee": 50, "def": 15, "init": 100, "archetype": "infantry", "disposition": "default"})
+	_create_unit("强盗重甲头目", 1, Vector2i(3, -1), "battle_axe", "plate_armor",
+		{"hp": 95, "melee": 52, "def": 18, "init": 72, "wisdom": 22, "stamina": 120,
+		"archetype": "heavy_infantry", "disposition": "guard"})
 
 
 func _init_unit_facing() -> void:
@@ -605,6 +642,8 @@ func _create_unit_from_job(unit_name: String, faction: int, axial: Vector2i,
 		"move":    p["move_range"],
 	})
 	unit.job = job
+	unit.ai_archetype_id = get_node("/root/ArchetypeDB").archetype_for_job(job_id)
+	unit.ai_disposition_id = "disciplined" if faction == 0 else "default"
 	return unit
 
 
@@ -632,6 +671,10 @@ func _create_unit(unit_name: String, faction: int, axial: Vector2i, weapon_id: S
 	unit.stats = stats
 	unit.weapon = weapon
 	unit.armor = armor
+	if params.has("archetype"):
+		unit.ai_archetype_id = str(params["archetype"])
+	if params.has("disposition"):
+		unit.ai_disposition_id = str(params["disposition"])
 	# 加到场景
 	unit_layer.add_child(unit)
 	unit.place_at(axial, hex_grid)
@@ -680,6 +723,13 @@ func _on_hex_clicked(axial: Vector2i) -> void:
 
 	var clicked_unit: Unit = hex_grid.get_occupant(axial)
 
+	# 道具选目标（Phase 3 占位：仅日志）
+	if _pending_item_id != "":
+		if clicked_unit and clicked_unit.is_alive():
+			_log_hint("[color=#888888]【道具】%s 尚未开放（Phase 3 接入背包）[/color]" % _pending_item_id)
+		_clear_attack_targeting()
+		return
+
 	# 点到敌方 → 仅在选择攻击/技能后允许发动
 	if clicked_unit and clicked_unit.get_faction() != current.get_faction():
 		if _pending_attack_mode == "":
@@ -699,7 +749,7 @@ func _on_hex_clicked(axial: Vector2i) -> void:
 
 	# 点到空格 → 尝试移动（攻击选目标中不移动）
 	if clicked_unit == null and _selected_unit == current:
-		if _pending_attack_mode != "":
+		if _pending_attack_mode != "" or _pending_item_id != "":
 			return
 		var path: Array[Vector2i] = hex_grid.find_path(current.axial_pos, axial, current.axial_pos, current.get_faction())
 		@warning_ignore("integer_division")
@@ -756,8 +806,8 @@ func _select_unit(unit: Unit) -> void:
 	_input_state = InputState.UNIT_SELECTED
 	hex_grid.clear_highlights()
 	hex_grid.set_selected(unit.axial_pos)
-	# 移动范围（攻击选目标时不显示蓝格，避免与射程标混淆）
-	if _pending_attack_mode == "":
+	# 移动范围（攻击/道具选目标时不显示蓝格，避免与射程标混淆）
+	if _pending_attack_mode == "" and _pending_item_id == "":
 		@warning_ignore("integer_division")
 		var max_steps: int = unit.stats.ap / Unit.AP_PER_HEX
 		var move_hexes: Array[Vector2i] = hex_grid.get_reachable(unit.axial_pos, max_steps, unit.get_faction())
@@ -806,7 +856,7 @@ func _attack_preview_attacker_for(target: Unit) -> Unit:
 	if current.stats.ap < current.get_weapon_ap_cost():
 		return null
 	var d: int = HexCoord.distance(current.axial_pos, target.axial_pos)
-	if _pending_attack_mode == "":
+	if _pending_attack_mode == "" or _pending_item_id != "":
 		return null
 	if d > current.weapon.attack_range:
 		return null
@@ -840,7 +890,7 @@ func _on_hex_hovered(axial: Vector2i) -> void:
 		hex_grid.set_highlight_path([] as Array[Vector2i])
 		hex_grid.set_highlight_oa_steps([] as Array[Vector2i])
 		return
-	if _pending_attack_mode != "":
+	if _pending_attack_mode != "" or _pending_item_id != "":
 		hex_grid.set_highlight_path([] as Array[Vector2i])
 		hex_grid.set_highlight_oa_steps([] as Array[Vector2i])
 		return
@@ -965,8 +1015,15 @@ func _on_any_unit_attacked(attacker: Unit, target: Unit, result: Dictionary) -> 
 	if attacker and target:
 		hit_dir = (target.position - attacker.position).normalized()
 	if not did_hit:
-		# 未命中：灰字 MISS，无粒子
-		DamageNumberScript.spawn(effect_layer, pos, "MISS", CombatPalette.miss_neutral)
+		var miss_label: String = "MISS"
+		var miss_color: Color = CombatPalette.miss_neutral
+		if result.get("blocked", false):
+			miss_label = "格挡"
+			miss_color = CombatPalette.armor_hit
+			HitEffectScript.spawn(effect_layer, pos, "spark", 0.8, hit_dir)
+		elif result.get("dodged", false):
+			miss_label = "闪避"
+		DamageNumberScript.spawn(effect_layer, pos, miss_label, miss_color)
 	elif hp_dmg > 0:
 		# 见血：红色血溅 + 红字伤害
 		HitEffectScript.spawn(effect_layer, pos, "blood", crit_intensity, hit_dir)
@@ -983,10 +1040,11 @@ func _on_any_unit_attacked(attacker: Unit, target: Unit, result: Dictionary) -> 
 func _play_attack_audio(result: Dictionary, did_hit: bool, is_crit: bool, hp_dmg: int, armor_dmg: int) -> void:
 	if not is_instance_valid(CombatAudio):
 		return
-	if result.get("blocked", false):
-		CombatAudio.play_blocked()
-	elif not did_hit:
-		CombatAudio.play_miss()
+	if not did_hit:
+		if result.get("blocked", false):
+			CombatAudio.play_blocked()
+		else:
+			CombatAudio.play_miss()
 	elif is_crit:
 		CombatAudio.play_crit()
 	elif hp_dmg > 0:
@@ -1044,8 +1102,8 @@ func _setup_pause_menu() -> void:
 	panel.set_anchors_preset(Control.PRESET_CENTER)
 	panel.offset_left = -140.0
 	panel.offset_right = 140.0
-	panel.offset_top = -110.0
-	panel.offset_bottom = 110.0
+	panel.offset_top = -140.0
+	panel.offset_bottom = 140.0
 	panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(0.10, 0.09, 0.07, 0.96)
@@ -1092,6 +1150,11 @@ func _setup_pause_menu() -> void:
 	resume_btn.pressed.connect(_close_pause_menu)
 	vbox.add_child(resume_btn)
 
+	var restart_btn := Button.new()
+	restart_btn.text = "重新开始"
+	restart_btn.pressed.connect(_restart_battle)
+	vbox.add_child(restart_btn)
+
 	var main_btn := Button.new()
 	main_btn.text = "返回主菜单"
 	main_btn.pressed.connect(_return_to_main_menu)
@@ -1103,6 +1166,10 @@ func _toggle_pause_menu() -> void:
 		_close_pause_menu()
 	else:
 		_open_pause_menu()
+
+
+func _restart_battle() -> void:
+	get_tree().reload_current_scene()
 
 
 func _open_pause_menu() -> void:
@@ -1162,69 +1229,78 @@ func _on_any_unit_moved(unit: Unit, _from: Vector2i, _to: Vector2i) -> void:
 		CombatAudio.play_footstep(unit.get_total_weight() if unit.has_method("get_total_weight") else 0)
 
 
+func _on_ai_round_started(_round_num: int) -> void:
+	_refresh_faction_brains()
+
+
+func _refresh_faction_brains() -> void:
+	_faction_brains = _FactionBrain.compute_all(_all_units, hex_grid)
+
+
+# ──────────── focus_marks 集火标记（已由 FactionBrain 产出，保留兼容）────────────
+
+## @deprecated 使用 FactionBrain.compute → focus_marks
+func _build_focus_marks(ai_unit: Unit) -> Dictionary:
+	var marks: Array = []
+	var my_faction: int = ai_unit.get_faction()
+	for ally in _all_units:
+		if ally == ai_unit or not ally.is_alive() or ally.get_faction() != my_faction:
+			continue
+		for d in range(6):
+			var nb: Vector2i = HexCoord.neighbor(ally.axial_pos, d)
+			var occ = hex_grid.get_occupant(nb) if hex_grid else null
+			# occ is Unit
+			if occ != null and occ.is_alive() and occ.get_faction() != my_faction:
+				if not occ in marks:
+					marks.append(occ)
+	return { "focus_marks": marks }
+
+
 # ──────────── AI（评分式决策） ────────────
-## 评分式：BattleAI 静态决策器返回 Plan，这里负责按 Plan 执行（移动 + 攻击 + 兜底结束回合）
+## 新 AI（决策/执行分离）：AIAgent + SceneExecutor
+## 旧 AI（BattleAI.decide）：保留作为 fallback，切换 flag use_new_ai
 ## 注意：_ai_acting 由 _on_turn_started 统一管理，此处不再设置
 func _run_ai_turn(unit: Unit) -> void:
 	await get_tree().create_timer(0.35).timeout
 	if not unit.is_alive():
-		# 开局前已死（极端情况），确保 TurnManager 推进
 		if turn_manager.get_current_unit() == unit:
 			unit.end_turn()
 		return
 
-	# 主循环：可能"移动+攻击"后 AP 还够再打 1 次，所以决策最多重试 3 次
-	var safety: int = 3
-	while safety > 0 and unit.is_alive():
-		safety -= 1
-		var plan: Dictionary = BattleAI.decide(unit, _all_units, hex_grid, {
-			"can_wait": turn_manager.can_wait(),
-			"has_waited": turn_manager.has_waited(unit),
-		})
-		var path_raw: Variant = plan.get("path", null)
-		var path: Array[Vector2i] = []
-		if path_raw != null and path_raw is Array:
-			for p in path_raw:
-				if p is Vector2i:
-					path.append(p)
-		var target: Unit = plan.get("target", null)
+	# 独立 RNG（从 battle_seed + unit 位置派生，同局可复现）
+	var ai_rng := RandomNumberGenerator.new()
+	ai_rng.seed = _battle_seed + unit.axial_pos.x * 1000 + unit.axial_pos.y
 
-		if plan.get("wait", false):
-			turn_manager.wait_current()
+	var agent := AIAgent.new(unit, ai_rng)
+	var executor := AISceneExecutor.new()
+	var guard: int = 0
+
+	while guard < agent._max_actions and unit.is_alive():
+		guard += 1
+		var brain: Dictionary = _faction_brains.get(unit.get_faction(), {})
+		var view: AIWorldView = AIWorldView.capture(unit, _all_units, hex_grid, turn_manager, brain)
+		var action = agent.decide_next_action(view)
+		var _AT = AISceneExecutor._AT
+
+		if action.type == _AT.END_TURN:
+			break
+
+		if action.type == _AT.WAIT:
+			await executor.run(action, unit, self, turn_manager)
+			return  # wait 后本回合不继续
+
+		var cont: bool = await executor.run(action, unit, self, turn_manager)
+		if not cont:
+			break
+		if not unit.is_alive():
 			return
 
-		# 1) 先执行移动（若有）
-		if not path.is_empty():
-			unit.move_along_path(path)
-			await get_tree().create_timer(path.size() * 0.22 + 0.1).timeout
-			if not unit.is_alive():
-				break  # 被借机攻击打死
-
-		# 1.5) 气力恢复（AI 力竭时）
-		if plan.get("breath_regulation", false) and unit.is_alive():
-			if unit.use_ability_breath_regulation():
-				break
-
-		# 2) 再执行攻击（若 plan 给出且仍可执行）
-		if target != null and unit.is_alive() and target.is_alive():
-			var atk_ap: int = unit.get_weapon_ap_cost()
-			var d: int = HexCoord.distance(unit.axial_pos, target.axial_pos)
-			if d <= unit.weapon.attack_range and unit.stats.ap >= atk_ap:
-				unit.attack_target(target)
-				await get_tree().create_timer(0.5).timeout
-				# AP 还多 → 再继续循环看是否能补刀
-				if unit.is_alive() and unit.stats.ap >= atk_ap:
-					continue
-			else:
-				print("[BattleAI] %s 攻击计划取消：距离=%d 射程=%d AP=%d 需要=%d" % [
-					unit.get_unit_name(), d, unit.weapon.attack_range, unit.stats.ap, atk_ap])
-		# 没有目标或已动用，回合结束
-		break
-
-	# 活着 → 正常结束回合；死了但仍是 current → 也调 end_turn 推进调度
-	# （_on_unit_died 也会推进，但 end_turn 的 _on_unit_action_completed 会安全跳过）
-	if unit.is_alive() or turn_manager.get_current_unit() == unit:
+	if unit.is_alive():
 		unit.end_turn()
+
+
+## 旧 AI（已下线：BattleAI.decide 被 AIAgent 替代）
+## BattleAI.gd 保留作参考但不调用
 
 
 # ──────────── 战斗结束 ────────────
@@ -1281,7 +1357,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 
 		if event.keycode == KEY_ESCAPE:
-			_toggle_pause_menu()
+			if _pause_menu_visible:
+				_close_pause_menu()
+			else:
+				_open_pause_menu()
 			get_viewport().set_input_as_handled()
 			return
 		elif event.keycode == KEY_R:

@@ -33,23 +33,23 @@ func test_stats_derivations() -> void:
 	print("  装皮甲（weight 8, class=light）：")
 	print("    eff_init  = %d  (期望 108)" % s.eff_init(8))
 	print("    eff_def   = %.1f (期望 50.0)" % s.eff_defense("light"))
-	print("    dodge%%    = %.1f%% (期望 ~21%%)" % s.dodge_chance(8, "light"))
+	print("    dodge_pts  = %.1f (默认 0；身轻如燕另算)" % s.dodge_chance(8, "light"))
 
 	print("  装锁子甲（weight 18, class=medium）：")
 	print("    eff_init  = %d  (期望 105)" % s.eff_init(18))
 	print("    eff_def   = %.1f (期望 35.0)" % s.eff_defense("medium"))
-	print("    dodge%%    = %.1f%% (期望 ~16%%)" % s.dodge_chance(18, "medium"))
+	print("    dodge_pts  = %.1f (默认 0)" % s.dodge_chance(18, "medium"))
 
 	print("  装板甲（weight 35, class=heavy）：")
 	print("    eff_init  = %d  (期望 101)" % s.eff_init(35))
 	print("    eff_def   = %.1f (期望 20.0)" % s.eff_defense("heavy"))
-	print("    dodge%%    = %.1f%% (期望 ~10%%)" % s.dodge_chance(35, "heavy"))
+	print("    dodge_pts  = %.1f (默认 0)" % s.dodge_chance(35, "heavy"))
 
 	print("  装板甲 + 装盾（base_block 25）：")
-	print("    block%%    = %.1f%% (期望 ~35%%)" % s.block_chance(25, "heavy"))
+	print("    block_pts  = %.1f (期望 25)" % s.block_chance(25, "heavy"))
 
 	print("  装皮甲 + 双匕首+精通（base_block 21）：")
-	print("    block%%    = %.1f%% (期望 ~46%%)" % s.block_chance(21, "light"))
+	print("    block_pts  = %.1f (期望 21)" % s.block_chance(21, "light"))
 
 	print("")
 

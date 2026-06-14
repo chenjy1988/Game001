@@ -1,5 +1,7 @@
 extends Node2D
 class_name HexGrid
+
+const _HexCoord = preload("res://scripts/core/HexCoord.gd")
 ##
 ## HexGrid.gd — 六边形战场
 ##
@@ -143,7 +145,7 @@ func _assign_hex_tiles() -> void:
 			var counts: Dictionary = {}
 			var self_b: String = _hex_biome[axial]
 			counts[self_b] = 1
-			for n in HexCoord.neighbors(axial):
+			for n in _HexCoord.neighbors(axial):
 				if not _hexes.has(n):
 					continue
 				var nb: String = _hex_biome[n]
@@ -161,7 +163,7 @@ func _assign_hex_tiles() -> void:
 	var tile_radius: float = HEX_SIZE + 3.5
 	_hex_border_cache.clear()
 	for axial in _hexes.keys():
-		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var center: Vector2 = _HexCoord.axial_to_pixel(axial, HEX_SIZE)
 		_hex_border_cache[axial] = _wavy_hex_polygon(center, tile_radius)
 
 
@@ -179,7 +181,7 @@ func _terrain_edge_wave(p: Vector2) -> float:
 
 
 func _wavy_hex_polygon(center: Vector2, radius: float) -> PackedVector2Array:
-	var corners: PackedVector2Array = HexCoord.corners(center, radius)
+	var corners: PackedVector2Array = _HexCoord.corners(center, radius)
 	var poly: PackedVector2Array = PackedVector2Array()
 	for i in range(6):
 		var c0: Vector2 = corners[i]
@@ -224,7 +226,7 @@ func _generate_obstacles() -> void:
 	var candidates: Array[Vector2i] = []
 	for axial in _hexes.keys():
 		# 中央核心保护（半径 2 内不放障碍）
-		if HexCoord.distance(axial, Vector2i.ZERO) <= 2:
+		if _HexCoord.distance(axial, Vector2i.ZERO) <= 2:
 			continue
 		# 双方出生带保护（按地图半径推算左右对峙区，避免出生点被随机障碍占用）
 		var spawn_margin: int = max(3, map_radius - 6)
@@ -276,7 +278,7 @@ func _count_reachable(origin: Vector2i) -> int:
 	visited[origin] = true
 	while not queue.is_empty():
 		var cur: Vector2i = queue.pop_front()
-		for n in HexCoord.neighbors(cur):
+		for n in _HexCoord.neighbors(cur):
 			if _hexes.has(n) and not visited.has(n):
 				visited[n] = true
 				queue.append(n)
@@ -287,15 +289,15 @@ func _build_astar() -> void:
 	_astar.clear()
 	# 添加所有 hex 为节点
 	for axial in _hexes.keys():
-		var id: int = HexCoord.axial_to_id(axial)
-		var pixel: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var id: int = _HexCoord.axial_to_id(axial)
+		var pixel: Vector2 = _HexCoord.axial_to_pixel(axial, HEX_SIZE)
 		_astar.add_point(id, pixel)
 	# 添加邻居连接
 	for axial in _hexes.keys():
-		var id: int = HexCoord.axial_to_id(axial)
-		for n in HexCoord.neighbors(axial):
+		var id: int = _HexCoord.axial_to_id(axial)
+		for n in _HexCoord.neighbors(axial):
 			if _hexes.has(n):
-				var nid: int = HexCoord.axial_to_id(n)
+				var nid: int = _HexCoord.axial_to_id(n)
 				if not _astar.are_points_connected(id, nid):
 					_astar.connect_points(id, nid)
 
@@ -321,7 +323,7 @@ func find_nearest_standable(preferred: Vector2i, exclude_occupied: bool = true) 
 	var queue: Array = [preferred]
 	while not queue.is_empty():
 		var cur: Vector2i = queue.pop_front()
-		for n in HexCoord.neighbors(cur):
+		for n in _HexCoord.neighbors(cur):
 			if visited.has(n):
 				continue
 			visited[n] = true
@@ -364,7 +366,7 @@ func move_occupant(from_axial: Vector2i, to_axial: Vector2i, unit) -> void:
 
 func _refresh_astar_disabled() -> void:
 	for axial in _hexes.keys():
-		var id: int = HexCoord.axial_to_id(axial)
+		var id: int = _HexCoord.axial_to_id(axial)
 		_astar.set_point_disabled(id, _occupants.has(axial))
 
 
@@ -374,8 +376,8 @@ func _refresh_astar_disabled() -> void:
 func find_path(from_axial: Vector2i, to_axial: Vector2i, ignore_occupant_at: Vector2i = Vector2i(99999, 99999), self_faction: int = -1) -> Array[Vector2i]:
 	if not _hexes.has(from_axial) or not _hexes.has(to_axial):
 		return []
-	var from_id: int = HexCoord.axial_to_id(from_axial)
-	var to_id: int = HexCoord.axial_to_id(to_axial)
+	var from_id: int = _HexCoord.axial_to_id(from_axial)
+	var to_id: int = _HexCoord.axial_to_id(to_axial)
 
 	# 临时解禁起点（自己站着也得能从起点出发）
 	var from_was_disabled: bool = _astar.is_point_disabled(from_id)
@@ -383,7 +385,7 @@ func find_path(from_axial: Vector2i, to_axial: Vector2i, ignore_occupant_at: Vec
 	var ignore_was_disabled: bool = false
 	var ignore_id: int = -1
 	if ignore_occupant_at != Vector2i(99999, 99999) and _hexes.has(ignore_occupant_at):
-		ignore_id = HexCoord.axial_to_id(ignore_occupant_at)
+		ignore_id = _HexCoord.axial_to_id(ignore_occupant_at)
 		ignore_was_disabled = _astar.is_point_disabled(ignore_id)
 		_astar.set_point_disabled(ignore_id, false)
 
@@ -398,7 +400,7 @@ func find_path(from_axial: Vector2i, to_axial: Vector2i, ignore_occupant_at: Vec
 				continue
 			if not u.has_method("is_alive") or not u.is_alive():
 				continue
-			var aid: int = HexCoord.axial_to_id(axial)
+			var aid: int = _HexCoord.axial_to_id(axial)
 			if _astar.is_point_disabled(aid):
 				ally_restores.append([aid, axial])
 				_astar.set_point_disabled(aid, false)
@@ -412,7 +414,7 @@ func find_path(from_axial: Vector2i, to_axial: Vector2i, ignore_occupant_at: Vec
 				continue
 			if not u.has_method("is_alive") or not u.is_alive():
 				continue
-			var eid: int = HexCoord.axial_to_id(axial)
+			var eid: int = _HexCoord.axial_to_id(axial)
 			if _astar.has_point(eid) and not _astar.is_point_disabled(eid):
 				enemy_disables.append([eid, false])
 				_astar.set_point_disabled(eid, true)
@@ -468,7 +470,7 @@ func find_path(from_axial: Vector2i, to_axial: Vector2i, ignore_occupant_at: Vec
 ## 反查：根据 AStar 存的 pixel 找到对应 axial（精确匹配避免 pixel_to_axial 浮点误差）
 func _pixel_to_axial_lookup(pixel: Vector2) -> Vector2i:
 	# 直接用数学反推（精确，因为 axial_to_pixel 是注入式映射）
-	return HexCoord.pixel_to_axial(pixel, HEX_SIZE)
+	return _HexCoord.pixel_to_axial(pixel, HEX_SIZE)
 
 
 ## 取从 origin 出发，AP/距离不超过 max_steps 的所有可达格（BFS）
@@ -483,7 +485,7 @@ func get_reachable(origin: Vector2i, max_steps: int, self_faction: int = -1) -> 
 		var cur_step: int = visited[cur]
 		if cur_step >= max_steps:
 			continue
-		for n in HexCoord.neighbors(cur):
+		for n in _HexCoord.neighbors(cur):
 			if not _hexes.has(n):
 				continue
 			if visited.has(n):
@@ -516,7 +518,7 @@ func get_attack_range_hexes(origin: Vector2i, range_min: int, range_max: int) ->
 	for axial in _hexes.keys():
 		if axial == origin:
 			continue
-		var d: int = HexCoord.distance(origin, axial)
+		var d: int = _HexCoord.distance(origin, axial)
 		if d >= rmin and d <= rmax:
 			result.append(axial)
 	return result
@@ -528,7 +530,7 @@ func get_attack_targets(origin: Vector2i, attack_range: int, attacker_faction: i
 	for axial in _occupants.keys():
 		if axial == origin:
 			continue
-		if HexCoord.distance(origin, axial) > attack_range:
+		if _HexCoord.distance(origin, axial) > attack_range:
 			continue
 		var unit = _occupants[axial]
 		if unit and unit.has_method("get_faction") and unit.get_faction() != attacker_faction:
@@ -543,7 +545,7 @@ func get_attack_targets(origin: Vector2i, attack_range: int, attacker_faction: i
 func get_zoc_controllers(cell: Vector2i, self_faction: int) -> Array:
 	var result: Array = []
 	# ZoC 固定为周身 1 格，与武器射程无关
-	for n in HexCoord.neighbors(cell):
+	for n in _HexCoord.neighbors(cell):
 		var u = _occupants.get(n, null)
 		if u == null:
 			continue
@@ -571,7 +573,7 @@ func get_zoc_cells_of(enemy_faction: int) -> Array[Vector2i]:
 			continue
 		if "weapon" in u and u.weapon != null and u.weapon.weapon_type != "melee":
 			continue
-		for n in HexCoord.neighbors(axial):
+		for n in _HexCoord.neighbors(axial):
 			if not _hexes.has(n):
 				continue
 			if seen.has(n):
@@ -642,11 +644,11 @@ func clear_highlights() -> void:
 
 # ──────────── 坐标工具（对外） ────────────
 func axial_to_world(axial: Vector2i) -> Vector2:
-	return HexCoord.axial_to_pixel(axial, HEX_SIZE) + position
+	return _HexCoord.axial_to_pixel(axial, HEX_SIZE) + position
 
 
 func world_to_axial(world_pos: Vector2) -> Vector2i:
-	return HexCoord.pixel_to_axial(world_pos - position, HEX_SIZE)
+	return _HexCoord.pixel_to_axial(world_pos - position, HEX_SIZE)
 
 
 ## 返回地图在世界坐标下的 AABB（供相机自适应使用）
@@ -655,7 +657,7 @@ func get_map_bounds() -> Rect2:
 	var max_v := Vector2(-INF, -INF)
 	var margin: float = HEX_SIZE + 4.0
 	for axial in _hexes.keys():
-		var c: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var c: Vector2 = _HexCoord.axial_to_pixel(axial, HEX_SIZE)
 		min_v.x = min(min_v.x, c.x - margin)
 		min_v.y = min(min_v.y, c.y - margin)
 		max_v.x = max(max_v.x, c.x + margin)
@@ -695,7 +697,7 @@ func _draw_terrain() -> void:
 	var color_inner_hi := Color(0.55, 0.47, 0.32, 0.18)
 
 	for axial in _hexes.keys():
-		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var center: Vector2 = _HexCoord.axial_to_pixel(axial, HEX_SIZE)
 		var biome: String = _hex_biome.get(axial, "grass")
 		var atlas: Texture2D = _atlas_by_biome.get(biome, null)
 		var border_pts: PackedVector2Array = _hex_border_cache.get(axial, PackedVector2Array())
@@ -712,9 +714,9 @@ func _draw_terrain() -> void:
 					atlas
 				)
 		else:
-			var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
+			var pts: PackedVector2Array = _HexCoord.corners(center, HEX_SIZE - 1.0)
 			_terrain_layer.draw_colored_polygon(pts, color_base_bot)
-			var pts_inner: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 3.5)
+			var pts_inner: PackedVector2Array = _HexCoord.corners(center, HEX_SIZE - 3.5)
 			_terrain_layer.draw_colored_polygon(pts_inner, color_base_top)
 			var pts_closed := pts.duplicate()
 			pts_closed.append(pts[0])
@@ -723,9 +725,9 @@ func _draw_terrain() -> void:
 	# ── 过渡纹理叠加：相邻 biome 不同时，在边界方向叠过渡贴图 ──
 	for axial in _hexes.keys():
 		var biome: String = _hex_biome.get(axial, "grass")
-		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var center: Vector2 = _HexCoord.axial_to_pixel(axial, HEX_SIZE)
 		for d in range(6):
-			var nb_axial: Vector2i = HexCoord.neighbor(axial, d)
+			var nb_axial: Vector2i = _HexCoord.neighbor(axial, d)
 			if not _hexes.has(nb_axial):
 				continue
 			var nb_biome: String = _hex_biome.get(nb_axial, "grass")
@@ -744,12 +746,12 @@ func _draw_terrain() -> void:
 	# ── 障碍格渲染：rocky 纹理 + 深色叠加 ──
 	var dark_overlay := Color(0.0, 0.0, 0.0, 0.55)
 	for axial in _obstacles.keys():
-		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var center: Vector2 = _HexCoord.axial_to_pixel(axial, HEX_SIZE)
 		var tex_idx: int = _obstacles[axial]
 		var obs_tex: Texture2D = null
 		if tex_idx < _obstacle_textures.size():
 			obs_tex = _obstacle_textures[tex_idx]
-		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE)
+		var pts: PackedVector2Array = _HexCoord.corners(center, HEX_SIZE)
 		if obs_tex != null:
 			# 用矩形 UV 采样（障碍纹理通常是独立贴图，非无缝 atlas）
 			var ts: Vector2 = obs_tex.get_size()
@@ -771,7 +773,7 @@ func _draw_terrain() -> void:
 # ──────────── BB 风攻击射程小标 ────────────
 func _draw_range_marker(center: Vector2, fill: Color, radius_scale: float) -> void:
 	var r: float = HEX_SIZE * radius_scale
-	var pts: PackedVector2Array = HexCoord.corners(center, r)
+	var pts: PackedVector2Array = _HexCoord.corners(center, r)
 	draw_colored_polygon(pts, fill)
 	var edge := pts.duplicate()
 	edge.append(pts[0])
@@ -802,30 +804,30 @@ func _draw() -> void:
 
 	# ---- 1) 敌方 ZoC（最底层叠加） ----
 	for axial in _highlight_zoc:
-		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
-		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
+		var center: Vector2 = _HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var pts: PackedVector2Array = _HexCoord.corners(center, HEX_SIZE - 1.0)
 		draw_colored_polygon(pts, color_zoc)
 
 	# ---- 3) 移动范围（呼吸动画） ----
 	var move_alpha: float = color_move.a * (0.7 + 0.3 * breath)
 	for axial in _highlight_move:
-		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
-		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
+		var center: Vector2 = _HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var pts: PackedVector2Array = _HexCoord.corners(center, HEX_SIZE - 1.0)
 		draw_colored_polygon(pts, Color(color_move.r, color_move.g, color_move.b, move_alpha))
 
 	# ---- 4) 攻击射程（BB 风：灰标=射程内空格，红标=可攻击敌方） ----
 	var marker_breath: float = 0.85 + 0.15 * breath
 	for axial in _highlight_attack_markers:
-		var center_g: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var center_g: Vector2 = _HexCoord.axial_to_pixel(axial, HEX_SIZE)
 		var gc: Color = CombatPalette.hex_attack_marker
 		_draw_range_marker(center_g, Color(gc.r, gc.g, gc.b, gc.a * marker_breath), 0.26)
 	for axial in _highlight_attack_enemy:
-		var center_r: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
-		var pts_en: PackedVector2Array = HexCoord.corners(center_r, HEX_SIZE - 1.0)
+		var center_r: Vector2 = _HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var pts_en: PackedVector2Array = _HexCoord.corners(center_r, HEX_SIZE - 1.0)
 		var atk_fill: Color = color_attack
 		var en_alpha: float = atk_fill.a * (0.72 + 0.28 * breath)
 		draw_colored_polygon(pts_en, Color(atk_fill.r, atk_fill.g, atk_fill.b, en_alpha))
-		var pts_edge: PackedVector2Array = HexCoord.corners(center_r, HEX_SIZE - 4.0)
+		var pts_edge: PackedVector2Array = _HexCoord.corners(center_r, HEX_SIZE - 4.0)
 		var pts_closed := pts_edge.duplicate()
 		pts_closed.append(pts_edge[0])
 		draw_polyline(pts_closed, CombatPalette.hex_attack_edge, 1.6, true)
@@ -833,7 +835,7 @@ func _draw() -> void:
 	# ---- 5) 路径（朝下一格的渐进金色三角） ----
 	for i in range(_highlight_path.size()):
 		var axial: Vector2i = _highlight_path[i]
-		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var center: Vector2 = _HexCoord.axial_to_pixel(axial, HEX_SIZE)
 		# 越靠近终点越亮
 		var t: float = (float(i) + 1.0) / float(_highlight_path.size())
 		var alpha: float = lerp(0.4, 0.95, t)
@@ -842,9 +844,9 @@ func _draw() -> void:
 	# ---- 6) 借机攻击触发点（强烈呼吸 + 双层描边警示） ----
 	var oa_color := Color(color_oa.r, color_oa.g, color_oa.b, color_oa.a * (0.6 + 0.4 * fast_breath))
 	for axial in _highlight_oa_steps:
-		var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
-		var pts_outer: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 2.0)
-		var pts_inner_warn: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 5.0)
+		var center: Vector2 = _HexCoord.axial_to_pixel(axial, HEX_SIZE)
+		var pts_outer: PackedVector2Array = _HexCoord.corners(center, HEX_SIZE - 2.0)
+		var pts_inner_warn: PackedVector2Array = _HexCoord.corners(center, HEX_SIZE - 5.0)
 		var po := pts_outer.duplicate(); po.append(pts_outer[0])
 		var pi := pts_inner_warn.duplicate(); pi.append(pts_inner_warn[0])
 		draw_polyline(po, oa_color, 3.0, true)
@@ -852,19 +854,19 @@ func _draw() -> void:
 
 	# ---- 7) Hover ----
 	if _hexes.has(_hover_hex):
-		var center: Vector2 = HexCoord.axial_to_pixel(_hover_hex, HEX_SIZE)
-		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
+		var center: Vector2 = _HexCoord.axial_to_pixel(_hover_hex, HEX_SIZE)
+		var pts: PackedVector2Array = _HexCoord.corners(center, HEX_SIZE - 1.0)
 		draw_colored_polygon(pts, color_hover)
 
 	# ---- 8) 选中（白金边 + 慢呼吸 + 外圈柔光） ----
 	if _hexes.has(_highlight_selected):
-		var center: Vector2 = HexCoord.axial_to_pixel(_highlight_selected, HEX_SIZE)
+		var center: Vector2 = _HexCoord.axial_to_pixel(_highlight_selected, HEX_SIZE)
 		# 外柔光（更大六边形，alpha 极低）
-		var glow_pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE + 4.0)
+		var glow_pts: PackedVector2Array = _HexCoord.corners(center, HEX_SIZE + 4.0)
 		var glow_a: float = CombatPalette.hex_selected_glow.a + 0.06 * breath
 		draw_colored_polygon(glow_pts, CombatPalette.with_alpha(CombatPalette.hex_selected_glow, glow_a))
 		# 描边
-		var pts: PackedVector2Array = HexCoord.corners(center, HEX_SIZE - 1.0)
+		var pts: PackedVector2Array = _HexCoord.corners(center, HEX_SIZE - 1.0)
 		var pts_closed := pts.duplicate()
 		pts_closed.append(pts[0])
 		draw_polyline(pts_closed, color_selected, 2.8, true)
@@ -883,16 +885,16 @@ func _draw() -> void:
 			var ex_pts: PackedVector2Array = _hex_border_cache.get(axial, PackedVector2Array())
 			if ex_pts.is_empty():
 				# 障碍格等无波浪缓存：用规则六边形（半径 HEX_SIZE 完美平铺，无重叠）
-				var ex_center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
-				ex_pts = HexCoord.corners(ex_center, HEX_SIZE)
+				var ex_center: Vector2 = _HexCoord.axial_to_pixel(axial, HEX_SIZE)
+				ex_pts = _HexCoord.corners(ex_center, HEX_SIZE)
 			draw_colored_polygon(ex_pts, Color(0.02, 0.02, 0.04, 0.58))
 		# 从未探索过：近黑大六边形遮罩（alpha 高，重叠不可见，确保格缝全黑）
 		var fog_targets: Array = _hexes.keys() + _obstacles.keys()
 		for axial in fog_targets:
 			if _visible_hexes.has(axial) or _explored_hexes.has(axial):
 				continue
-			var center: Vector2 = HexCoord.axial_to_pixel(axial, HEX_SIZE)
-			var pts: PackedVector2Array = HexCoord.corners(center, FOG_RADIUS)
+			var center: Vector2 = _HexCoord.axial_to_pixel(axial, HEX_SIZE)
+			var pts: PackedVector2Array = _HexCoord.corners(center, FOG_RADIUS)
 			draw_colored_polygon(pts, Color(0.0, 0.0, 0.0, 0.92))
 
 
@@ -945,7 +947,7 @@ func is_hex_explored(axial: Vector2i) -> bool:
 func _draw_top_highlight(pts: PackedVector2Array, color: Color) -> void:
 	# pointy-top 六边形的顶点顺序：12点-2点-4点-6点-8点-10点
 	# 上半边 = [10点→12点, 12点→2点, 2点→4点]
-	# 对应索引（HexCoord.corners 从右上开始？）我们保守画 3 段相邻边
+	# 对应索引（_HexCoord.corners 从右上开始？）我们保守画 3 段相邻边
 	# 找出 y 最小的顶点作为"顶"，然后向两侧各延伸一条边
 	var top_idx: int = 0
 	for i in range(pts.size()):

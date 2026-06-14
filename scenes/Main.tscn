@@ -54,11 +54,24 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -120.0
-offset_top = 80.0
+offset_top = 60.0
 offset_right = 120.0
-offset_bottom = 140.0
+offset_bottom = 120.0
 theme_override_font_sizes/font_size = 22
 text = "开始战斗"
+
+[node name="QuitButton" type="Button" parent="UI"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -120.0
+offset_top = 136.0
+offset_right = 120.0
+offset_bottom = 196.0
+theme_override_font_sizes/font_size = 18
+text = "退出游戏"
 
 [node name="Hint" type="Label" parent="UI"]
 anchors_preset = 12
@@ -68,6 +81,6 @@ anchor_bottom = 1.0
 offset_top = -60.0
 theme_override_colors/font_color = Color(0.45, 0.45, 0.45, 1)
 theme_override_font_sizes/font_size = 12
-text = "Enter / Space 开始    ESC 退出"
+text = "Enter / Space 开始战斗"
 horizontal_alignment = 1
 vertical_alignment = 1
